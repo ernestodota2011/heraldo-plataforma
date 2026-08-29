@@ -1,0 +1,178 @@
+# Gate de verificacion de Heraldo (D-12, RF-27).
+#
+# El defecto mas grave que midio la auditoria del referente es que TIENE buenos
+# tests y NADA los corre. Aqui el gate existe ANTES que la primera funcion: este
+# archivo se escribio en el commit del cimiento, no despues.
+#
+# La prueba de aislamiento entre inquilinos (T-013 / T-014-ter / T-014-quinquies)
+# YA existe y corre aqui: `pytest` recoge `apps/api/tests` entero. Ademas se la
+# nombra POR RUTA en su propio paso, para que borrarla o renombrarla ponga el CI
+# en rojo en vez de reducir en silencio lo que se mide — el verde no dice QUE
+# midio (`feedback_verde_no_dice_que_midio`).
+#
+# LIMITE DECLARADO, NO MAQUILLADO (P-01): este gate se pone en rojo, pero
+# **NO impide la fusion**. La proteccion de rama de esta cuenta devuelve
+# `403 Upgrade to GitHub Pro`, asi que RF-27 esta cumplido a medias: la mitad
+# «la suite corre y se pone en rojo» esta cerrada; la mitad «impide la fusion»
+# espera una decision de dinero. No se simula con nada.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Menor privilegio: el gate solo necesita leer el arbol.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificacion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      # Postgres REAL. La suite de aislamiento no tiene doble: RLS, `FORCE`,
+      # `SET LOCAL` y el rechazo de un INSERT ajeno son comportamiento del motor,
+      # y un simulacro mediria el simulacro.
+      #
+      # Imagen fijada por DIGEST, igual que las acciones: una etiqueta se mueve.
+      postgres:
+        image: postgres@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685 # 16-alpine
+        env:
+          # `trust` y no una contrasena: asi en este repositorio NO hay ninguna
+          # credencial, ni siquiera de juguete (una contrasena de juguete
+          # commiteada ensena que commitear contrasenas es normal). El contenedor
+          # vive solo mientras dura el trabajo y solo lo alcanza este trabajo.
+          # En una maquina de desarrollo el DSN viaja por entorno y la instancia
+          # local si exige contrasena: el CI es el entorno MENOS expuesto, no el
+          # patron a copiar.
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: heraldo_test
+        ports:
+          - 5432:5432
+        # Sin esto, los primeros pasos correrian contra un Postgres que aun no
+        # acepta conexiones y el fallo pareceria del codigo.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+      # Redis REAL, por la misma razon que el Postgres: D-05 pone las sesiones
+      # (T-015) y los limites (T-019) en Redis PORQUE en memoria del proceso el
+      # limite se multiplica por el numero de workers y «revocada» significa
+      # «revocada en este worker». Un doble en memoria mediria exactamente el
+      # defecto que D-05 descarta, y saldria verde.
+      #
+      # Fijado por DIGEST, igual que el resto: una etiqueta se mueve.
+      redis:
+        image: redis@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf # 7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # El DSN se declara por ENTORNO, tambien aqui. `conftest.py` falla en ROJO
+      # si falta: sin base no se salta la suite, se cae.
+      HERALDO_DATABASE_URL_ADMIN: postgresql+psycopg://postgres@127.0.0.1:5432/heraldo_test
+      # Sin contrasena, por el mismo motivo que Postgres: en este repositorio no
+      # hay ninguna credencial, ni siquiera de juguete. `conftest.py` falla en
+      # ROJO si falta: sin Redis no se salta la suite, se cae.
+      HERALDO_REDIS_URL: redis://127.0.0.1:6379/0
+
+    steps:
+      # Acciones fijadas por DIGEST, no por etiqueta: una etiqueta se puede
+      # mover y con ella entraria codigo de terceros en el gate.
+      - name: Descargar el arbol
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # WHY: por defecto `checkout` trae UN solo commit. El gate de
+          # publicabilidad tiene que leer los MENSAJES del rango que este cambio
+          # anade, y sobre un clon superficial ese rango no existe: el gate se
+          # pondria rojo por no poder medir — honesto, pero inutil. Con el
+          # historial completo mide de verdad.
+          fetch-depth: 0
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Sincronizar el workspace
+        # --locked: si uv.lock no corresponde a los pyproject.toml, el gate se
+        # pone en ROJO en vez de resolver algo distinto a lo que se reviso.
+        run: uv sync --locked --all-packages --dev
+
+      - name: Lint
+        run: uv run --no-sync ruff check .
+
+      # ESTE REPOSITORIO ES PUBLICO (P-40). El gate se pone en rojo si entra el
+      # nombre de un cliente, el de un servidor propio, una direccion de la red
+      # interna o una credencial -- en un archivo O en un MENSAJE de commit.
+      # Va antes de la suite a proposito: es de segundos, y lo que caza no se
+      # arregla despues (un mensaje de commit ya empujado solo se limpia
+      # reescribiendo la historia).
+      #
+      # `--desde` recibe la base real del evento: en un pull request, el commit
+      # del que sale la rama; en un push, el estado anterior de la rama. Asi se
+      # miran los mensajes que ESTE cambio anade y no los 40 de siempre.
+      - name: Publicabilidad
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$BASE" ] && [ "$BASE" != "0000000000000000000000000000000000000000" ]; then
+            git fetch --quiet origin "$BASE" 2>/dev/null || true
+            uv run --no-sync python scripts/publicable.py --desde "$BASE"
+          else
+            # Sin base (rama nueva, primer empuje): el arbol si se puede medir.
+            # Se dice en voz alta que los mensajes NO se midieron, en vez de
+            # dejar creer que si.
+            echo "AVISO: sin sha base, los MENSAJES de commit no se revisan"
+            uv run --no-sync python scripts/publicable.py
+          fi
+
+      # La bateria, NOMBRADA POR RUTA. El paso de abajo la volveria a correr
+      # dentro de la suite completa, pero solo si sigue donde dice estar: si
+      # alguien la borra o la renombra, `pytest` sale con «file or directory not
+      # found» y el CI se pone en ROJO, en vez de seguir verde midiendo menos. Es
+      # barato (`--collect-only` no toca la base) y no lleva ningun numero magico
+      # que caduque.
+      #
+      # ESTA LISTA NO SE MANTIENE A MANO: `test_cimiento.py` la compara con los
+      # archivos de prueba que existen de verdad y se pone en rojo si divergen.
+      # Hasta que ese guard existio, la lista cubria 11 de los 15 archivos
+      # —`test_confirmacion.py`, que es el gate de RNF-06 y el que cazo P-31,
+      # estaba FUERA— y nadie se enteraba: `feedback_mecanismo_cableado_a_uno`
+      # aplicado al propio gate.
+      - name: La bateria esta donde el gate dice
+        run: >-
+          uv run --no-sync pytest --collect-only -q
+          apps/api/tests/test_aislamiento.py
+          apps/api/tests/test_escalada_alcance.py
+          apps/api/tests/test_rls_cobertura.py
+          apps/api/tests/test_sesion_revocacion.py
+          apps/api/tests/test_limites.py
+          apps/api/tests/test_multiproceso.py
+          apps/api/tests/test_baa_guard.py
+          apps/api/tests/test_secretos.py
+          apps/api/tests/test_bitacora.py
+          apps/api/tests/test_cola.py
+          apps/api/tests/test_idempotencia.py
+          apps/api/tests/test_salud_cola.py
+          apps/api/tests/test_confirmacion.py
+          apps/api/tests/test_superficie.py
+          apps/api/tests/test_worker.py
+          apps/api/tests/test_cimiento.py
+          apps/api/tests/test_publicable.py
+
+      - name: Suite
+        run: uv run --no-sync pytest

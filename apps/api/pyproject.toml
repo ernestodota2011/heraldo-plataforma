@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "heraldo-api"
+version = "0.0.0"
+description = "Heraldo API: recibe, verifica, encola y sirve el panel"
+requires-python = ">=3.12"
+dependencies = [
+    # Punto unico de salida, DECLARADO como dependencia — nunca copiado (L-07).
+    "heraldo-egress",
+    # Acceso a datos. `psycopg` (v3) sirve al motor sincrono de Alembic y al
+    # asincrono de la aplicacion con UN solo driver: un driver por camino seria
+    # una segunda forma de abrir conexion, y aqui solo puede haber una.
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+    "alembic>=1.14",
+    # Capa HTTP (D-01: los cinco servicios vivos de la casa son FastAPI).
+    # Piso en 0.115: es la serie donde `Annotated[..., Depends(...)]` sobre una
+    # dependencia de tipo `yield` es la forma soportada — y es justo la forma con
+    # la que la compuerta de RNF-06 sostiene abierta la transaccion de inquilino
+    # mientras dura la operacion destructiva.
+    "fastapi>=0.115",
+    # T-016 (RF-09): cifrado en reposo con AES-256-GCM. No se escribe criptografia
+    # a mano: la biblioteca de referencia de Python es la que audita medio mundo.
+    #
+    # WHY (el piso es 50 y no 44): la revision cruzada senalo que el piso admitia
+    # versiones con un aviso de seguridad abierto. El `uv.lock` ya resolvia 50.0.1
+    # —o sea, lo que de verdad corre nunca fue vulnerable—, pero un piso que admite
+    # una version que nadie ha verificado es una puerta abierta el dia que alguien
+    # regenere el lock desde cero. ==El piso declara lo que se verifico, no lo mas
+    # antiguo que compila.==
+    "cryptography>=50",
+    # Estado compartido entre procesos (D-05): sesiones (T-015), limites (T-019)
+    # e idempotencia (T-021). En memoria del proceso el limite se multiplica por el
+    # numero de workers y «revocada» significa «revocada aqui» — el defecto 6 del
+    # referente. ==El piso es el mas alto de los dos carriles que lo declararon.==
+    "redis>=5.2",
+    # T-023 (RNF-07) — el servidor ASGI que SIRVE la aplicacion.
+    #
+    # WHY (por que esto faltaba y nadie lo notaba): la suite entera mide la
+    # aplicacion via `httpx.AsyncClient` con transporte ASGI directo — golpea
+    # `crear_aplicacion()` en memoria, sin abrir un puerto de verdad. `uvicorn`
+    # nunca hizo falta para que `uv run pytest` saliera en verde, y por eso
+    # faltaba: se destapo desplegando de verdad (T-023). Sin esto la imagen
+    # construye, `uv sync` sale en verde, y el contenedor de la API revienta al
+    # arrancar con "uvicorn: executable file not found in $PATH".
+    "uvicorn[standard]>=0.34",
+]
+
+# `find` y no una lista a mano: un subpaquete nuevo bajo `app/` (por ejemplo
+# `app/tenancy/`) entra solo. Con la lista a mano se quedaria fuera del paquete
+# instalado y el fallo aparece lejos, como un ImportError en otra maquina.
+[tool.setuptools.packages.find]
+include = ["app*"]

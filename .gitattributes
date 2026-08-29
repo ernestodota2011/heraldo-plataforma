@@ -1,0 +1,9 @@
+# El repositorio se edita en Windows y se ejecuta en Linux. Sin esto, git
+# convierte los finales de linea al sacar el arbol y un colaborador de Windows
+# acaba commiteando CRLF en un .py o en el YAML del CI: el diff se llena de
+# ruido y algun interprete se atraganta. Normalizado a LF en el repositorio,
+# pase lo que pase en la maquina de cada quien.
+* text=auto eol=lf
+
+# Generado por uv: se versiona, pero no ensucia las revisiones.
+uv.lock linguist-generated=true

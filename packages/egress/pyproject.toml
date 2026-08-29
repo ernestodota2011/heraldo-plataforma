@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "heraldo-egress"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.setuptools]
+package-dir = { "egress" = "." }
+packages = ["egress"]

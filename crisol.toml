@@ -1,0 +1,28 @@
+# Politica de privacidad para la revision cruzada de Crisol.
+#
+# Se declara AQUI, en el repo, no en la linea de comandos. Desde RF-13-bis
+# (2026-07-30) `--policy` solo ENDURECE: un repo sin declarar no lo abre ningun
+# flag. Antes 7 de 10 repos no declaraban, el operador tecleaba `--policy agencia`
+# por costumbre, y esa costumbre abria tambien lo que no debia.
+#
+# agencia     = codigo propio de AetherLogik -> se revisa
+# cliente-std = cliente sin BAA/PHI          -> se revisa
+# cliente-baa = cliente con BAA/PHI          -> NUNCA sale a un motor externo
+#
+# "agencia": Heraldo es un PRODUCTO INTERNO de AetherLogik. En este repositorio no
+# vive dato de ningun cliente final, no hay credenciales (el DSN viaja por
+# entorno) y no hay BAA de por medio: RNF-04 dice que Heraldo NO aloja datos de
+# salud protegidos y que el cliente sanitario de la agencia NO es inquilino, y T-021-bis construye el
+# guard que lo hace cumplir en el alta. Asi que el diff puede salir a un motor
+# externo de otra familia, que es lo que hace valida la revision cruzada.
+#
+# Si algun dia esto alojara datos de un inquilino con BAA, esta linea cambia
+# ANTES de tocar el codigo — no despues.
+[project]
+name = "heraldo"
+policy = "agencia"
+
+# Sin seccion [metrics] a proposito. Los pisos deterministas (cobertura del diff,
+# mutacion) se declaran DESPUES de calibrarlos con `crisol-remote --metrics-only`;
+# ponerlos a ojo produce un NO-GO falso que bloquea todo el trabajo del repo, o un
+# piso tan bajo que no bloquea nada. Aqui todavia no hay nada calibrado.

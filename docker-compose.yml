@@ -1,0 +1,114 @@
+# T-023 (RNF-07) — D-11: Docker Compose en el host de despliegue, publicado por el proxy
+# de casa. Este archivo NO trae credenciales: todo secreto llega por `.env`
+# (permisos 600 en el host, nunca versionado — ver `.env.example`).
+#
+# WHY (no hay servicio "worker" aqui, y ya NO es por falta de mecanismo):
+# P-28 (docs/heraldo-problemas.md) preguntaba como descubre el worker que
+# agencias tienen trabajo pendiente sin abrir un segundo camino de conexion
+# (el plan Sec.4 prohibe una segunda forma de abrir sesion). La respuesta ya
+# esta en la propia politica de RLS de la clase "de agencia" (plan Sec.3.1):
+# `agencia_id = ... AND ( alcance = 'agencia' OR cliente_id = ... )`. Una
+# sesion de alcance `agencia` YA ve la cola ENTERA de su agencia -- todos sus
+# clientes -- sin ningun rol nuevo ni ninguna tabla de despacho. El diseno
+# correcto del worker es: ENUMERAR con alcance `agencia` (una sesion por
+# agencia conocida) y PROCESAR cada trabajo reclamado con una sesion de
+# alcance `cliente` (la del propio trabajo) -- exactamente el patron que ya
+# usa `sesion_de_inquilino` en el resto del producto.
+#
+# Lo que sigue faltando NO es el mecanismo: es el PUNTO DE ENTRADA ejecutable
+# (no existe `apps/worker/__main__.py` ni equivalente que llame a
+# `worker.bucle.bucle()`) y el manejador que de verdad genera. Eso es codigo
+# de PRODUCTO (F1 en adelante) y no se improvisa desde un docker-compose.yml
+# de infraestructura -- por eso el servicio sigue sin declararse aqui, ahora
+# por division de responsabilidad, no por un hueco sin resolver. Cuando ese
+# entry point exista, el servicio "worker" se agrega con la MISMA imagen
+# (`${HERALDO_IMAGEN}`) y un `command` distinto -- no hace falta una imagen
+# nueva.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${HERALDO_DB_ADMIN_USER}
+      POSTGRES_PASSWORD: ${HERALDO_DB_ADMIN_PASSWORD}
+      POSTGRES_DB: heraldo
+    volumes:
+      - heraldo_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${HERALDO_DB_ADMIN_USER} -d heraldo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [interna]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${HERALDO_REDIS_PASSWORD}", "--appendonly", "yes"]
+    volumes:
+      - heraldo_redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${HERALDO_REDIS_PASSWORD} ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [interna]
+
+  # Un solo tiro (RNF-07): migra el esquema y da LOGIN al rol de aplicacion.
+  # `restart: "no"` a proposito — no es un servicio de larga duracion, es un
+  # paso de despliegue. `api` no arranca hasta que este termine en verde
+  # (`depends_on: condition: service_completed_successfully`).
+  migrar:
+    image: ${HERALDO_IMAGEN}
+    command: ["python", "deploy/migrar_y_activar_rol.py"]
+    environment:
+      HERALDO_DATABASE_URL_ADMIN: "postgresql+psycopg://${HERALDO_DB_ADMIN_USER}:${HERALDO_DB_ADMIN_PASSWORD}@db:5432/heraldo"
+      HERALDO_APP_DB_PASSWORD: ${HERALDO_APP_DB_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [interna]
+
+  api:
+    image: ${HERALDO_IMAGEN}
+    command:
+      - uvicorn
+      - app.main:crear_aplicacion
+      - --factory
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+      - --app-dir
+      - apps/api
+    restart: unless-stopped
+    environment:
+      HERALDO_ENTORNO: produccion
+      HERALDO_ORIGENES_PERMITIDOS: ${HERALDO_ORIGENES_PERMITIDOS}
+      HERALDO_DATABASE_URL: "postgresql+psycopg://heraldo_app:${HERALDO_APP_DB_PASSWORD}@db:5432/heraldo"
+      HERALDO_REDIS_URL: "redis://:${HERALDO_REDIS_PASSWORD}@redis:6379/0"
+      HERALDO_SECRETOS_CLAVE: ${HERALDO_SECRETOS_CLAVE}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrar:
+        condition: service_completed_successfully
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/salud/vivacidad', timeout=2)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks: [interna]
+
+networks:
+  interna:
+    driver: bridge
+
+volumes:
+  heraldo_db_data:
+  heraldo_redis_data:

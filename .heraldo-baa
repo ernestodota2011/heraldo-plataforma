@@ -1,0 +1,23 @@
+# Centinela de regimen sanitario de Heraldo — RNF-04 / T-021-bis.
+#
+# Este archivo NO es documentacion: `apps/api/app/tenancy/baa_guard.py` lo LEE
+# en cada alta de cliente. Es el mismo patron que usa Crisol con `.crisol-baa`:
+# la politica vive en un artefacto del repositorio, no en la memoria de quien
+# opera.
+#
+# El regimen se declara en la primera linea que no sea comentario ni este vacia.
+# Hoy el UNICO valor que el guard sabe interpretar es `sin-baa`. Cualquier otra
+# cosa —un valor desconocido, el archivo borrado, el archivo ilegible— deja el
+# regimen INDETERMINADO, y un regimen indeterminado RECHAZA todas las altas. No
+# se degrada al permisivo: no poder preguntar no es una respuesta afirmativa.
+#
+# `sin-baa` significa: Heraldo v1 NO aloja datos de salud protegidos y NO opera
+# bajo un Business Associate Agreement. Ese cliente NO es inquilino de Heraldo.
+# Mientras esta linea diga `sin-baa`, el alta de un cliente marcado como
+# sanitario —o cuyo nombre contradiga su sector declarado— se rechaza.
+#
+# Si algun dia Heraldo firmara un BAA, esta linea cambia ANTES de tocar el
+# codigo, y el codigo que interprete el nuevo valor se escribe en ese momento:
+# hoy no existe, y su ausencia es lo que hace que el cambio no pueda ser
+# silencioso.
+sin-baa

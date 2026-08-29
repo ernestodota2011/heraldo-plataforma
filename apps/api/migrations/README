@@ -1,0 +1,12 @@
+Migraciones de Heraldo (Alembic, historia lineal — D-10).
+
+Se escriben A MANO. La autogeneracion sin revisar quedo descartada en el plan:
+las politicas de RLS y los privilegios del rol no salen de un `--autogenerate`.
+
+Ejecutar:
+
+    HERALDO_DATABASE_URL_ADMIN=postgresql+psycopg://<admin>@<host>:<puerto>/<base> \
+        uv run alembic -c apps/api/migrations/alembic.ini upgrade head
+
+El DSN es el del rol MIGRADOR (dueño de las tablas), que NO es el rol de la
+aplicacion. Esa separacion es el punto 1 del mecanismo de aislamiento.

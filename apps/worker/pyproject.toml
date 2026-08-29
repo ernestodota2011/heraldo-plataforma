@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "heraldo-worker"
+version = "0.0.0"
+description = "Heraldo worker: consume la cola y genera"
+requires-python = ">=3.12"
+dependencies = [
+    # Punto unico de salida, DECLARADO como dependencia — nunca copiado (L-07).
+    "heraldo-egress",
+    # WHY: el worker abre sesiones de base de datos, y «no existe una segunda forma
+    # de abrir conexion» (plan §4). Esa unica forma vive en `app.tenancy.sesion`,
+    # dentro de `heraldo-api`, asi que el worker la DECLARA en vez de copiarla —
+    # exactamente la misma regla que L-07 aplica al punto de salida.
+    #
+    # ⚠️ DEUDA DECLARADA (P-29): la direccion de esta dependencia esta al reves.
+    # `tenancy` es codigo compartido por los dos servicios y deberia vivir en
+    # `packages/`, como `egress`. Hoy no se mueve porque `app/tenancy/` lo estan
+    # tocando otras tareas en paralelo y moverlo seria un choque garantizado. Lo
+    # que SI se conserva es el invariante que importa: hay UN solo modulo de
+    # sesion y nadie lo copia (lo comprueba `test_escalada_alcance.py`).
+    "heraldo-api",
+]
+
+[tool.setuptools]
+package-dir = { "worker" = "." }
+packages = ["worker"]
