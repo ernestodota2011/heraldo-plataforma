@@ -39,6 +39,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import shutil
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -49,8 +52,37 @@ import yaml
 RAIZ = Path(__file__).resolve().parents[1]
 FLUJO = RAIZ / ".github" / "workflows" / "ci.yml"
 
-REPOSITORIO = "ernestodota2011/heraldo"
 RAMA = "main"
+
+
+class RemotoNoResuelto(RuntimeError):
+    """Sin saber sobre QUE repositorio se escribe, no se escribe."""
+
+
+def repositorio() -> str:
+    """`duenyo/nombre`, DERIVADO del remoto `origin`.
+
+    WHY: aqui habia un nombre escrito a mano, y quedo obsoleto el dia que el
+    repositorio cambio de sitio. Un guion que protege «un repositorio» y lleva
+    escrito CUAL puede acabar aplicando la regla al sitio que no era, o fallando
+    sin decir por que. El remoto es la unica fuente que no puede mentir sobre
+    donde se esta trabajando.
+    """
+    salida = subprocess.run(  # noqa: S603 (argv fijo + ruta absoluta resuelta aqui)
+        [shutil.which("git") or "git", "remote", "get-url", "origin"],
+        cwd=RAIZ,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if salida.returncode != 0:
+        raise RemotoNoResuelto("no hay remoto `origin`: no se sabe que repositorio proteger")
+    encontrado = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?\s*$", salida.stdout.strip())
+    if encontrado is None:
+        raise RemotoNoResuelto(
+            "el remoto `origin` no tiene la forma `duenyo/nombre`: no se escribe a ciegas"
+        )
+    return f"{encontrado.group(1)}/{encontrado.group(2)}"
 
 _API = "https://api.github.com"
 
@@ -214,7 +246,7 @@ def aplicar(contextos: list[str]) -> dict:
         "allow_force_pushes": False,
         "allow_deletions": False,
     }
-    return _peticion("PUT", f"/repos/{REPOSITORIO}/branches/{RAMA}/protection", cuerpo)
+    return _peticion("PUT", f"/repos/{repositorio()}/branches/{RAMA}/protection", cuerpo)
 
 
 def divergencias(vivo: dict, contextos: list[str]) -> list[str]:
@@ -244,7 +276,7 @@ def divergencias(vivo: dict, contextos: list[str]) -> list[str]:
 
 
 def verificar(contextos: list[str]) -> list[str]:
-    vivo = _peticion("GET", f"/repos/{REPOSITORIO}/branches/{RAMA}/protection")
+    vivo = _peticion("GET", f"/repos/{repositorio()}/branches/{RAMA}/protection")
     return divergencias(vivo, contextos)
 
 
@@ -262,7 +294,7 @@ def main() -> int:
 
     if not argumentos.verificar:
         aplicar(contextos)
-        print(f"proteccion aplicada sobre {REPOSITORIO}@{RAMA}")
+        print(f"proteccion aplicada sobre {repositorio()}@{RAMA}")
 
     fallos = verificar(contextos)
     if fallos:

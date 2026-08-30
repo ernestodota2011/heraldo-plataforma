@@ -29,13 +29,15 @@ producto— ya cuelga de este mismo gate, contra un **Postgres real** levantado
 como servicio del trabajo: RLS, `FORCE`, `SET LOCAL` y el rechazo de un `INSERT`
 ajeno son comportamiento del motor, y un simulacro mediría el simulacro.
 
-> **Lo que todavía NO hace: impedir la fusión.** El gate se pone en rojo, pero
-> hoy nada evita que alguien fusione con el rojo puesto. Bloquear la fusión
-> necesita protección de rama, y la cuenta que hospeda este repositorio privado
-> no la tiene disponible en su plan. Está medido y abierto como **P-01** en
-> [`docs/heraldo-problemas.md`](docs/heraldo-problemas.md). Mientras esa entrada
-> siga abierta, **RF-27 no está cumplido**: un CI en rojo aquí es una
-> advertencia, no una barrera. No lo trates como si fuera una barrera.
+> **Y lo impide de verdad.** La rama principal exige la comprobación
+> `verificacion`, y la regla **incluye a quien administra** (`enforce_admins`):
+> con el gate en rojo GitHub rechaza la fusión, también al dueño del
+> repositorio. No es una promesa de este README — está medido por efecto:
+> se intentó fusionar un cambio con el CI en rojo y GitHub lo rechazó, con su
+> control en verde. Lo aplica
+> [`deploy/proteger_rama.py`](deploy/proteger_rama.py), que **deriva** del
+> propio `ci.yml` las comprobaciones a exigir y **relee** lo aplicado, porque un
+> `200` dice que la petición se aceptó, no que el estado quedara como se pidió.
 
 ## Cómo está organizado
 
@@ -199,4 +201,7 @@ avisarnos en privado y qué puedes esperar de nosotros.
 
 ---
 
-Producto interno de **AetherLogik**. Repositorio privado.
+Producto de **AetherLogik**. Repositorio **público**: el trabajo anterior se
+hizo en un repositorio privado que se conserva como archivo histórico, porque
+reescribir su historia para publicarla habría destruido la evidencia de cada
+casilla cerrada.
