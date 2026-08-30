@@ -173,6 +173,7 @@ jobs:
           apps/api/tests/test_worker.py
           apps/api/tests/test_cimiento.py
           apps/api/tests/test_publicable.py
+          apps/api/tests/test_egreso_red.py
 
       - name: Suite
         run: uv run --no-sync pytest

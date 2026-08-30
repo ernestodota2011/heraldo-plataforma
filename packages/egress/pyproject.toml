@@ -6,7 +6,18 @@ build-backend = "setuptools.build_meta"
 name = "heraldo-egress"
 version = "0.0.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    # T-300 (RF-04/RF-05): el guard de red ES el transporte, no un validador que
+    # alguien recuerda llamar antes de abrir su propio socket. Por eso el cliente
+    # HTTP es dependencia REAL de este paquete.
+    #
+    # WHY (por que no basta con que la suite ya lo tenga): `httpx` estaba solo en el
+    # grupo `dev` del workspace. Declararlo ahi y usarlo en produccion es P-38 con
+    # otro traje --504 pruebas en verde y la aplicacion sin arrancar--, y es la misma
+    # trampa que ya obligo a poner `pyyaml` fuera de `dev` para `deploy/`. Un paquete
+    # declara lo que USA, no lo que resulta que estaba instalado.
+    "httpx>=0.27",
+]
 
 [tool.setuptools]
 package-dir = { "egress" = "." }
