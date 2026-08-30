@@ -205,3 +205,6 @@ Producto de **AetherLogik**. Repositorio **público**: el trabajo anterior se
 hizo en un repositorio privado que se conserva como archivo histórico, porque
 reescribir su historia para publicarla habría destruido la evidencia de cada
 casilla cerrada.
+
+<!-- SABOTAJE TEMPORAL (se revierte en el commit siguiente): una direccion de la red interna, para comprobar por efecto que el gate de publicabilidad pone el CI en rojo Y que la rama rechaza la fusion. -->
+<!-- 10.20.1.41 -->
