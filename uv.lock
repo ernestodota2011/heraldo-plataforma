@@ -361,6 +361,12 @@ requires-dist = [
 name = "heraldo-egress"
 version = "0.0.0"
 source = { editable = "packages/egress" }
+dependencies = [
+    { name = "httpx" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "httpx", specifier = ">=0.27" }]
 
 [[package]]
 name = "heraldo-worker"
