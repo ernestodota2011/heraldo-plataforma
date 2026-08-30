@@ -3,6 +3,16 @@ name = "heraldo"
 version = "0.0.0"
 description = "Heraldo — plataforma multi-inquilino de agentes de IA en marca blanca"
 requires-python = ">=3.12"
+license = { file = "LICENSE" }
+# WHY: el repositorio es publico, pero el software no es libre. Sin esta
+# declaracion la licencia solo la ve quien abra LICENSE, y la herramienta que
+# empaqueta no la ve nunca. `Private :: Do Not Upload` no es decorativo: PyPI
+# RECHAZA un paquete que lo lleve, asi que una subida por accidente falla
+# en vez de publicar la plataforma de la agencia.
+classifiers = [
+    "License :: Other/Proprietary License",
+    "Private :: Do Not Upload",
+]
 dependencies = [
     "heraldo-api",
     "heraldo-worker",
