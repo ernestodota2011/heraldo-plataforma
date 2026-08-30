@@ -12,14 +12,15 @@ hacerlo público. Te lo agradecemos de verdad.
 Escríbenos a **info@aetherlogik.com** con `[SEGURIDAD]` al principio del asunto.
 Esa es hoy la única vía, y llega a un buzón que leemos.
 
-No abras un *issue* para reportar una vulnerabilidad: los *issues* los ve
-cualquiera con acceso al repositorio, y el correo no.
+No abras un *issue* para reportar una vulnerabilidad: los *issues* de un repositorio
+público los ve **cualquiera**, y el correo no.
 
-> El aviso privado de GitHub (*Security* → *Report a vulnerability*), que sería
-> la vía preferible porque va cifrada de extremo a extremo, **no está disponible
-> en este repositorio**: comprobado, la función no existe sobre un repositorio
-> privado de esta cuenta. Si eso cambia, esta página lo dirá y ese pasará a ser
-> el canal principal. Hasta entonces no lo busques: no está.
+> **Actualizado — ya está disponible, y es la vía preferida.** El aviso privado
+> de GitHub (*Security* → *Report a vulnerability*) va cifrado de extremo a
+> extremo. Esta página decía que no existía, y era cierto: la función no está
+> sobre un repositorio privado. Decía también que si eso cambiaba lo diría.
+> Cambió — el repositorio es público y la función está **activada, comprobado
+> por efecto**. El correo de arriba sigue valiendo si lo prefieres.
 
 ## Qué necesitamos de ti
 
