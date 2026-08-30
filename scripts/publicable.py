@@ -107,6 +107,14 @@ EXENTAS: dict[str, str] = {
         "este archivo lleva escritos los patrones estructurales que busca; casarian "
         "consigo mismos"
     ),
+    "apps/api/tests/test_egreso_red.py": (
+        "es la bateria del guard anti-SSRF (T-300): nombra los tres PREFIJOS de RFC 1918 "
+        "para derivar de ellos los casos que el guard debe rechazar. Solo prefijos: las "
+        "direcciones concretas se derivan y ninguna describe una red real, despues de que "
+        "este gate rechazara la primera version por llevar dos de la agencia (P-41). "
+        "La exencion levanta las formas ESTRUCTURALES; los terminos vigilados siguen "
+        "poniendo el archivo en rojo"
+    ),
     "apps/api/tests/test_publicable.py": (
         "la bateria de este gate necesita muestras que disparen cada patron"
     ),

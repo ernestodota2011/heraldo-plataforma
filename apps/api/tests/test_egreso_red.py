@@ -26,6 +26,8 @@ import pytest
 from egress.red import (
     MAXIMO_DE_REDIRECCIONES,
     DestinoRechazado,
+    ErrorDeSalida,
+    SalidaFallida,
     es_alcanzable,
     pedir,
     validar,
@@ -35,6 +37,25 @@ RAIZ = Path(__file__).resolve().parents[3]
 
 #: Una direccion publica de verdad. Se usa como CONTROL: lo que debe seguir pasando.
 PUBLICA = "93.184.216.34"
+
+#: Los tres rangos privados de RFC 1918, por su PREFIJO. Las direcciones concretas se
+#: DERIVAN de aqui (`_primera_de`) y no se escriben.
+#:
+#: # WHY: la primera version de esta bateria escribio tres direcciones a mano y las
+#: tres describian una red real —dos de la agencia, y al corregirlas, una del rango de
+#: un cliente—. El gate de publicabilidad rechazo las primeras en el CI y el guard de
+#: aislamiento rechazo las segundas. Los dos tenian razon, y el arreglo de fondo no era
+#: elegir mejor: era ==dejar de elegir==. La primera direccion de un prefijo no
+#: describe la red de nadie, y ademas dice lo que la prueba quiere decir —*«todo el
+#: rango»*— en vez de un ejemplo suelto que alguien tomaria por una direccion nuestra.
+#: ==El fixture de un guard es el sitio mas probable para reintroducir justo lo que el
+#: guard prohibe, porque ahi el material prohibido es legitimo== (P-41).
+RANGOS_PRIVADOS = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+
+
+def _primera_de(prefijo: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    """La primera direccion utilizable del rango. Derivada, nunca escrita."""
+    return ipaddress.ip_network(prefijo)[1]
 
 
 def _resolutor(*direcciones: str):
@@ -70,9 +91,10 @@ def test_control_un_nombre_que_resuelve_a_publica_pasa() -> None:
     [
         ("bucle local IPv4", "https://127.0.0.1/"),
         ("bucle local IPv6", "https://[::1]/"),
-        ("privada 10/8", "https://10.20.1.41/"),
-        ("privada 192.168/16", "https://192.168.1.40/"),
-        ("privada 172.16/12", "https://172.20.0.5/"),
+        *(
+            (f"privada {rango}", f"https://{_primera_de(rango)}/")
+            for rango in RANGOS_PRIVADOS
+        ),
         ("enlace local — metadatos de nube", "https://169.254.169.254/latest/meta-data/"),
         ("CGNAT 100.64/10", "https://100.64.0.1/"),
         ("sin especificar", "https://0.0.0.0/"),
@@ -300,6 +322,60 @@ async def test_una_redireccion_sin_destino_se_rechaza_no_se_adivina() -> None:
             resolver=_resolutor(PUBLICA),
             transporte=httpx.MockTransport(manejador),
         )
+
+
+@pytest.mark.asyncio
+async def test_una_redireccion_hacia_una_url_con_credenciales_se_rechaza() -> None:
+    """Lo levanto la revision cruzada, y esta cubierto — pero no estaba MEDIDO.
+
+    # WHY: `urljoin` conserva el `usuario:clave@` del destino, asi que la comprobacion
+    # de la URL lo caza en el salto igual que en la primera peticion. Que este cubierto
+    # «por como funciona urljoin» no es garantia de nada mientras nadie lo compruebe:
+    # el dia que alguien cambie como se resuelve el salto, esto dejaria de ser cierto
+    # en silencio.
+    """
+
+    def manejador(peticion: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            302, headers={"location": "https://usuario:clave@93.184.216.34/robado"}
+        )
+
+    with pytest.raises(DestinoRechazado, match="credenciales"):
+        await pedir(
+            "https://ejemplo.test/aviso",
+            resolver=_resolutor(PUBLICA),
+            transporte=httpx.MockTransport(manejador),
+        )
+
+
+@pytest.mark.asyncio
+async def test_un_fallo_de_RED_no_es_un_rechazo_del_guard() -> None:
+    """==La distincion que tiene consecuencia de producto.==
+
+    Un rechazo es una decision del guard y no se reintenta jamas. Un fallo de red es
+    transitorio y el trabajo vuelve a la cola. Si las dos cosas llegaran como la misma
+    excepcion, `entregar()` acabaria reintentando destinos prohibidos o tirando envios
+    legitimos porque el DNS parpadeo.
+    """
+
+    def manejador(peticion: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("no hay ruta al equipo", request=peticion)
+
+    with pytest.raises(SalidaFallida, match="se puede reintentar") as capturado:
+        await pedir(
+            "https://ejemplo.test/aviso",
+            resolver=_resolutor(PUBLICA),
+            transporte=httpx.MockTransport(manejador),
+        )
+
+    assert not isinstance(capturado.value, DestinoRechazado), (
+        "un fallo de red llega como rechazo del guard: quien entrega no puede "
+        "distinguir «prohibido» de «no contesta»"
+    )
+    assert isinstance(capturado.value, ErrorDeSalida), (
+        "los dos comparten raiz, para quien quiera cazar ambos de una vez"
+    )
+    assert "ConnectError" in str(capturado.value), "el mensaje no dice QUE tipo de fallo fue"
 
 
 @pytest.mark.asyncio

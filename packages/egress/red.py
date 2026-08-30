@@ -74,13 +74,35 @@ METODOS_PERMITIDOS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}
 REDIRECCIONES = frozenset({301, 302, 303, 307, 308})
 
 
-class DestinoRechazado(ValueError):
-    """El destino no puede alcanzarse. El motivo dice QUE regla lo rechazo.
+class ErrorDeSalida(Exception):
+    """Lo que puede salir mal al intentar salir. Tiene DOS hijos, y no son lo mismo."""
+
+
+class DestinoRechazado(ErrorDeSalida, ValueError):
+    """El guard dijo que NO. El motivo dice QUE regla lo rechazo.
 
     # WHY (el mensaje nombra la regla y la direccion, y eso es deliberado): la
     # direccion rechazada no es un secreto —la declaro el propio inquilino— y sin
     # ella el operador no puede arreglar su configuracion. Lo que NUNCA aparece aqui
     # es el contenido del mensaje ni ninguna credencial.
+    """
+
+
+class SalidaFallida(ErrorDeSalida):
+    """El destino era legitimo y la red no llego: sin ruta, sin DNS, sin tiempo, TLS roto.
+
+    # WHY (por que NO es un `DestinoRechazado`, aunque sea mas corto tener uno solo):
+    # la diferencia tiene consecuencia de producto. Un rechazo es una decision del
+    # guard y **no se reintenta jamas** — reintentar una direccion prohibida es
+    # insistir en el error. Un fallo de red es transitorio y el trabajo **si vuelve a
+    # la cola**. Con una sola excepcion, `entregar()` tendria que adivinar cual de las
+    # dos cosas paso leyendo un texto, y acabaria reintentando destinos prohibidos o
+    # descartando envios legitimos porque el DNS parpadeo.
+    #
+    # # WHY (por que no se deja escapar la excepcion cruda de la biblioteca): lo
+    # levanto la revision cruzada, y es el mismo defecto que ya se acepto en P-39: un
+    # fallo de transporte que sale como rastreo crudo lo lee quien opera como «el
+    # codigo esta roto», no como «ese destino no contesta».
     """
 
 
@@ -326,15 +348,25 @@ async def pedir(
             propias = {"Host": _cabecera_host(destino)}
             propias.update(dict(cabeceras or {}))
 
-            respuesta = await cliente.request(
-                metodo.upper(),
-                _url_fijada(destino, siguiente),
-                content=contenido,
-                headers=propias,
-                # El certificado se valida contra el NOMBRE, no contra la IP a la que
-                # conectamos: sin esto, fijar la direccion romperia el TLS.
-                extensions={"sni_hostname": destino.host},
-            )
+            try:
+                respuesta = await cliente.request(
+                    metodo.upper(),
+                    _url_fijada(destino, siguiente),
+                    content=contenido,
+                    headers=propias,
+                    # El certificado se valida contra el NOMBRE, no contra la IP a la que
+                    # conectamos: sin esto, fijar la direccion romperia el TLS.
+                    extensions={"sni_hostname": destino.host},
+                )
+            except httpx.HTTPError as fallo:
+                # El mensaje nombra al destino y al TIPO de fallo, no el rastreo: quien
+                # opera necesita saber a quien no se llego, no la pila de la biblioteca.
+                # Y jamas se cita el contenido que se iba a enviar.
+                raise SalidaFallida(
+                    f"no se pudo alcanzar {destino.host!r} en {destino.direccion}: "
+                    f"{type(fallo).__name__}. El destino no esta prohibido — la red fallo, "
+                    "asi que esto se puede reintentar"
+                ) from fallo
 
             if respuesta.status_code not in REDIRECCIONES:
                 return respuesta
