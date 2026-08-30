@@ -135,3 +135,6 @@ def test_ninguna_exencion_esta_muerta() -> None:
 def test_el_gate_encuentra_archivos_que_revisar() -> None:
     """El control del control: con la lista vacia, todo lo anterior pasaria vacio."""
     assert len(_gate()._archivos_versionados()) >= 20
+
+# SABOTAJE 2 (inofensivo, se revierte): un import sin usar -> ruff en rojo.
+import json
