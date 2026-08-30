@@ -1,0 +1,68 @@
+Heraldo — plataforma multi-inquilino de agentes de IA en marca blanca
+Copyright (c) 2026 AetherLogik LLC (Florida, EE. UU.). Todos los derechos reservados.
+
+================================================================================
+ESPAÑOL
+================================================================================
+
+Este repositorio es de CODIGO VISIBLE, no de codigo abierto.
+
+Es publico por dos razones, y ninguna es la cesion de derechos: para que su
+historia y su verificacion puedan auditarse, y porque la compuerta que impide
+fusionar un cambio con las pruebas en rojo solo existe sobre repositorios
+publicos. Poder LEER este codigo no concede ninguna licencia para USARLO.
+
+AetherLogik LLC se reserva todos los derechos sobre este software. Sin permiso
+previo y por escrito de AetherLogik LLC no se concede derecho alguno a usar,
+copiar, modificar, fusionar, publicar, distribuir, sublicenciar ni vender copias
+de este software o de partes de el, ni a explotarlo comercialmente, ni a crear
+obras derivadas, ni a desplegarlo para uno mismo o para terceros.
+
+Si se permite, sin pedir permiso: leer el codigo, citarlo con atribucion y
+reproducir fragmentos breves para comentarlo, estudiarlo, ensenarlo o reportar
+un fallo de seguridad conforme a SECURITY.md.
+
+EL SOFTWARE SE ENTREGA "TAL CUAL", SIN GARANTIA DE NINGUN TIPO, EXPRESA O
+IMPLICITA, INCLUIDAS SIN LIMITACION LAS GARANTIAS DE COMERCIABILIDAD, IDONEIDAD
+PARA UN FIN DETERMINADO Y NO INFRACCION. EN NINGUN CASO LOS TITULARES DEL
+COPYRIGHT SERAN RESPONSABLES DE NINGUNA RECLAMACION, DANO U OTRA RESPONSABILIDAD
+DERIVADA DEL SOFTWARE O DE SU USO.
+
+Para pedir una licencia de uso, escribe a info@aetherlogik.com con
+[LICENCIA] al principio del asunto.
+
+================================================================================
+ENGLISH
+================================================================================
+
+This repository is SOURCE-AVAILABLE, not open source.
+
+It is public for two reasons, neither of which is a grant of rights: so that its
+history and its verification can be audited, and because the gate that blocks
+merging a change while its tests are failing exists only on public repositories.
+Being able to READ this code grants no license to USE it.
+
+AetherLogik LLC reserves all rights in this software. Without the prior written
+permission of AetherLogik LLC, no right is granted to use, copy, modify, merge,
+publish, distribute, sublicense or sell copies of this software or any part of
+it, nor to exploit it commercially, nor to create derivative works, nor to
+deploy it for oneself or for third parties.
+
+Permitted without asking: reading the code, quoting it with attribution, and
+reproducing short excerpts to comment on it, study it, teach it, or report a
+security issue as described in SECURITY.md.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM THE
+SOFTWARE OR THE USE OF THE SOFTWARE.
+
+To request a license, write to info@aetherlogik.com with [LICENSE] at the start
+of the subject line.
+
+================================================================================
+
+Governing language / Lengua que rige: in case of any discrepancy between the two
+versions above, the ENGLISH version governs, and this license is construed under
+the laws of the State of Florida, United States.

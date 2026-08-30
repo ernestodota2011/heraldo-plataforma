@@ -199,9 +199,19 @@ DELETE /clientes/{id}?confirmacion=<la de arriba>  → 200, hecho
 ¿Encontraste un fallo de seguridad? [`SECURITY.md`](SECURITY.md) te dice cómo
 avisarnos en privado y qué puedes esperar de nosotros.
 
+## Licencia
+
+**Código visible, no código abierto.** Este repositorio es público para que su
+historia y su verificación puedan auditarse — y porque la compuerta que impide
+fusionar un cambio con las pruebas en rojo sólo existe sobre repositorios
+públicos. Poder leer este código no concede ninguna licencia para usarlo:
+AetherLogik LLC se reserva todos los derechos. Los términos exactos, y lo que
+**sí** puedes hacer sin pedir permiso, están en [`LICENSE`](LICENSE).
+
 ---
 
 Producto de **AetherLogik**. Repositorio **público**: el trabajo anterior se
-hizo en un repositorio privado que se conserva como archivo histórico, porque
-reescribir su historia para publicarla habría destruido la evidencia de cada
-casilla cerrada.
+hizo en un repositorio privado que ya no existe en GitHub, y cuya historia
+completa —commits, revisiones y corridas de verificación— se conserva fuera de
+línea, porque reescribirla para publicarla habría destruido la evidencia de
+cada casilla cerrada.
