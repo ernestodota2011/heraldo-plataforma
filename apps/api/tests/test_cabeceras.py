@@ -32,11 +32,13 @@ from __future__ import annotations
 
 import ast
 import inspect
+import re
 from typing import Any
 from uuid import UUID
 
 import httpx
 import pytest
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 
 from app.health import RUTA_VIVACIDAD
 from app.main import Entorno, crear_aplicacion
@@ -45,7 +47,8 @@ from app.superficie_publica import (
     CABECERAS_INVARIANTES,
     CSP_DOCUMENTACION,
     CSP_INTERFAZ,
-    ORIGEN_DEL_NAVEGADOR_INTERACTIVO,
+    ORIGENES_DEL_NAVEGADOR_INTERACTIVO,
+    RUTA_ESQUEMA,
     RUTA_NAVEGADOR,
     RUTAS_DE_DOCUMENTACION,
     VARIABLE_DOCUMENTACION,
@@ -159,7 +162,7 @@ async def test_la_politica_de_contenido_de_una_ruta_normal_es_la_estricta() -> N
     assert respuesta.headers.get("content-security-policy") == CSP_INTERFAZ
 
 
-async def test_las_rutas_del_mapa_declaran_el_origen_del_navegador_interactivo() -> None:
+async def test_las_rutas_del_mapa_llevan_su_propia_politica_de_contenido() -> None:
     """CONTROL de la de arriba: si TODAS llevaran la estricta, el navegador
     interactivo no cargaria ni su guion y «seguro» seria «roto»."""
     aplicacion = _aplicacion(
@@ -167,9 +170,41 @@ async def test_las_rutas_del_mapa_declaran_el_origen_del_navegador_interactivo()
     )
     async with _cliente(aplicacion) as cliente:
         respuesta = await cliente.get(RUTA_NAVEGADOR)
-    politica = respuesta.headers.get("content-security-policy")
-    assert politica == CSP_DOCUMENTACION
-    assert ORIGEN_DEL_NAVEGADOR_INTERACTIVO in politica
+    assert respuesta.headers.get("content-security-policy") == CSP_DOCUMENTACION
+
+
+@pytest.mark.parametrize(
+    "pagina", [get_swagger_ui_html, get_redoc_html], ids=["swagger", "redoc"]
+)
+def test_la_politica_admite_TODO_lo_que_la_pagina_carga_de_verdad(pagina) -> None:
+    """La comprobacion que faltaba, y que costo un hallazgo de Crisol.
+
+    Comparar la cabecera contra su propia constante mide COHERENCIA, no
+    SUFICIENCIA: sale verde con una politica que rompe la pagina. Aqui el arbitro
+    es el HTML que el marco emite de verdad — si manana cambia de CDN, de icono o
+    de tipografia, esta prueba se pone roja en vez de dejar una pagina rota
+    detras de una cabecera que «esta puesta».
+
+    # WHY (lo que sigue SIN medirse, dicho en voz alta): que el navegador OBEDEZCA
+    # la politica. Esto lee el HTML, no ejecuta un navegador. Lo segundo es el
+    # barrido de CE-18 sobre la superficie servida.
+    """
+    html = pagina(openapi_url=RUTA_ESQUEMA, title="x").body.decode()
+    referidos = {
+        f"{esquema}://{maquina}"
+        for esquema, maquina in re.findall(r"(https?)://([^/\"'\s]+)", html)
+    }
+    ajenos = sorted(referidos - set(ORIGENES_DEL_NAVEGADOR_INTERACTIVO))
+    assert not ajenos, (
+        f"la pagina carga de {ajenos} y la politica no los admite: el navegador los "
+        "bloquea y la pagina sale rota. Una cabecera que rompe lo que protege no es "
+        "seguridad, es una averia con buena prensa"
+    )
+    for origen in referidos:
+        assert origen in CSP_DOCUMENTACION, (
+            f"{origen} esta declarado en la lista pero no aparece en la politica: "
+            "la lista y la cabecera se separaron"
+        )
 
 
 # --------------------------------------------------------------------------
@@ -286,15 +321,24 @@ async def test_control_publica_si_sirve_las_tres_rutas(ruta: str) -> None:
 # --------------------------------------------------------------------------
 @pytest.mark.parametrize("ruta", RUTAS_DE_DOCUMENTACION)
 async def test_autenticada_con_la_identidad_SIN_CABLEAR_no_sirve_el_mapa(ruta) -> None:
-    """Con el proveedor por defecto —el que falla cerrado— no sale ningun mapa."""
+    """Con el proveedor por defecto —el que falla cerrado— no sale ningun mapa.
+
+    Y no basta con «no sale»: tiene que ser INDISTINGUIBLE de una ruta que no
+    existe. Lo levanto Crisol sobre la primera version, que dejaba subir el 503
+    del proveedor sin cablear — y un 503 frente a un 404 sigue diciendo «aqui hay
+    un mapa». Sin este `assert`, un 503 pasaria la prueba con las dos manos.
+    """
     aplicacion = _aplicacion(
         exposicion_de_documentacion=ExposicionDeDocumentacion.AUTENTICADA
     )
     async with _cliente(aplicacion) as cliente:
+        patron = await cliente.get(RUTA_QUE_NO_EXISTE)
         respuesta = await cliente.get(ruta)
-    assert (
-        respuesta.status_code != 200
-    ), f"{ruta} sirvio el mapa sin identidad ninguna: `autenticada` no autentica"
+    assert (respuesta.status_code, respuesta.text) == (patron.status_code, patron.text), (
+        f"{ruta} respondio {respuesta.status_code} con la identidad sin cablear, y "
+        f"una ruta inexistente responde {patron.status_code}. La diferencia confirma "
+        "que ahi hay un mapa que alguien esta protegiendo"
+    )
 
 
 @pytest.mark.parametrize("ruta", RUTAS_DE_DOCUMENTACION)

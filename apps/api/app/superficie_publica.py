@@ -140,16 +140,42 @@ CSP_INTERFAZ = (
     "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 )
 
-#: La del navegador interactivo, que SI carga guion y hoja de estilo — del mismo
-#: CDN que usa el marco. Se nombra el origen exacto en vez de aflojar a `'self'` o
-#: al comodin: si manana el marco cambiara de CDN, esto se rompe a la vista en vez
-#: de callarse.
-ORIGEN_DEL_NAVEGADOR_INTERACTIVO = "https://cdn.jsdelivr.net"
+#: Los origenes que el navegador interactivo carga DE VERDAD. No es una lista de
+#: buena fe: sale de leer el HTML que emite el marco (`get_swagger_ui_html` y
+#: `get_redoc_html`), y `test_cabeceras` la cruza contra ese HTML en cada corrida.
+#:
+#: # WHY (por que se enumeran y no se afloja a `'self'` o al comodin): un comodin
+#: convierte esta pagina en un sitio donde cualquiera puede meter un guion. Y una
+#: lista escrita a ojo es peor que ninguna: la primera version de esta constante
+#: solo tenia el CDN, y con ella `redoc` se quedaba SIN FUENTES y las dos paginas
+#: sin icono —medido leyendo el HTML—, o sea una politica que no protegia nada y
+#: ademas rompia la pagina. Lo levanto Crisol; la sonda le dio la razon.
+#:
+#: # WHY (lo que esta lista NO puede derivarse sola): `fonts.gstatic.com` no
+#: aparece en el HTML — lo pide la hoja de estilo de `fonts.googleapis.com`, que
+#: es la que si aparece. Va declarado a mano y con este motivo escrito, porque un
+#: barrido del HTML no lo va a encontrar nunca.
+ORIGENES_DEL_NAVEGADOR_INTERACTIVO: tuple[str, ...] = (
+    "https://cdn.jsdelivr.net",  # el guion y la hoja de estilo del navegador
+    "https://fastapi.tiangolo.com",  # el icono de la pestana
+    "https://fonts.googleapis.com",  # la hoja de estilo de las fuentes (redoc)
+    "https://fonts.gstatic.com",  # los ficheros de fuente que pide la anterior
+)
+
+_CDN = "https://cdn.jsdelivr.net"
+_FUENTES = "https://fonts.googleapis.com"
+_ICONO = "https://fastapi.tiangolo.com"
+
+#: # WHY (`'unsafe-inline'` en los ESTILOS, y solo ahi): `redoc` emite un bloque
+#: `<style>` dentro de su propio HTML — medido, no supuesto. Sin esto la pagina
+#: sale rota. En los GUIONES no se admite: ahi es donde el inline hace dano, y
+#: ninguna de las dos paginas lo necesita.
 CSP_DOCUMENTACION = (
     "default-src 'none'; "
-    f"script-src {ORIGEN_DEL_NAVEGADOR_INTERACTIVO}; "
-    f"style-src {ORIGEN_DEL_NAVEGADOR_INTERACTIVO} 'unsafe-inline'; "
-    f"img-src {ORIGEN_DEL_NAVEGADOR_INTERACTIVO} data:; "
+    f"script-src {_CDN}; "
+    f"style-src {_CDN} {_FUENTES} 'unsafe-inline'; "
+    "font-src https://fonts.gstatic.com; "
+    f"img-src {_CDN} {_ICONO} data:; "
     "connect-src 'self'; "
     "frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 )
@@ -234,16 +260,23 @@ async def exigir_operador_de_agencia(request: Request):
     Devuelve 404 —no 403— a quien no lo sea: para el portal de un cliente, ese
     mapa no existe.
 
-    # WHY (lo que esto NO tapa hoy, dicho en voz alta): mientras la identidad no
-    # este cableada (T-015), el proveedor por defecto responde 503, y un 503 en
-    # `/docs` frente al 404 de una ruta inexistente SIGUE distinguiendo. Por eso
-    # produccion declara `apagada` hasta que T-015 exista; esta via es para el dia
-    # que exista, y la prueba mide las dos cosas.
+    # WHY (por que se traga CUALQUIER fallo del proveedor y tambien sale 404): lo
+    # levanto Crisol y tenia razon. La primera version dejaba subir la excepcion
+    # del proveedor, asi que con la identidad sin cablear (T-015) `/docs` respondia
+    # 503 — y un 503 frente al 404 de una ruta inexistente SIGUE diciendo «aqui hay
+    # un mapa». Tragarse una excepcion suele ser un defecto; aqui es el contrato:
+    # el compromiso de esta ruta es «para quien no sea un operador de la agencia,
+    # esto no existe», y un proveedor roto no es un operador de la agencia. El
+    # motivo del fallo no se pierde para el resto de la aplicacion: esta compuerta
+    # es solo de las tres rutas del mapa.
     """
     from app.tenancy.inquilino import Alcance
 
     superficie = request.app.state.superficie
-    inquilino = await superficie.proveedor_de_inquilino(request)
+    try:
+        inquilino = await superficie.proveedor_de_inquilino(request)
+    except Exception as fallo:  # noqa: BLE001 - ver el WHY: aqui el 404 ES el contrato
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from fallo
     if inquilino.alcance is not Alcance.AGENCIA:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return inquilino
