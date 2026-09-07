@@ -85,6 +85,9 @@ services:
     environment:
       HERALDO_ENTORNO: produccion
       HERALDO_ORIGENES_PERMITIDOS: ${HERALDO_ORIGENES_PERMITIDOS}
+      # T-033 / RF-61 - el mapa de la interfaz NO se publica. `autenticada` queda
+      # para cuando exista identidad real (T-015): hoy su 503 aun distingue.
+      HERALDO_DOC_INTERFAZ: apagada
       HERALDO_DATABASE_URL: "postgresql+psycopg://heraldo_app:${HERALDO_APP_DB_PASSWORD}@db:5432/heraldo"
       HERALDO_REDIS_URL: "redis://:${HERALDO_REDIS_PASSWORD}@redis:6379/0"
       HERALDO_SECRETOS_CLAVE: ${HERALDO_SECRETOS_CLAVE}
