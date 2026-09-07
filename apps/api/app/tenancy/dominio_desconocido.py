@@ -157,7 +157,22 @@ async def exigir_dominio_atendible(request: Request) -> EstadoDeDominio:
     # fuera tambien lo que todavia no se ha inventado.
     """
     superficie = request.app.state.superficie
-    estado = await superficie.resolutor_de_dominio(dominio_de(request))
+    try:
+        estado = await superficie.resolutor_de_dominio(dominio_de(request))
+    except Exception as fallo:  # noqa: BLE001 - ver el WHY: el 404 ES el contrato
+        # WHY (lo levanto Crisol y tenia razon): si el resolutor revienta —la base
+        # caida, un tiempo de espera agotado— y la excepcion sube, sale un 500. Y un
+        # 500 **vuelve a distinguir**: los dominios que exigen consultar la base
+        # fallan, y los que se descartan antes no. La averia se convierte en el
+        # oraculo que RF-60 existe para negar. Aqui un fallo del resolutor es «no
+        # atendido», igual que los otros tres.
+        #
+        # # WHY (por que esto NO esconde la averia): durante una caida, TODOS los
+        # dominios fallan igual, asi que la respuesta sigue sin distinguir a nadie;
+        # y quien tiene que enterarse de la caida es la sonda de disponibilidad
+        # (RF-51), que para eso existe y mira la base a proposito. Enterarse por el
+        # codigo de error de una pagina publica seria enterarse regalando el dato.
+        raise DominioNoReconocido from fallo
     if estado is not EstadoDeDominio.VERIFICADO:
         raise DominioNoReconocido
     return estado

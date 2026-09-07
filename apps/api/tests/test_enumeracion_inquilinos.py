@@ -211,6 +211,35 @@ async def test_la_respuesta_no_nombra_el_producto_ni_la_agencia(estado, marca) -
 
 
 # ==========================================================================
+# La AVERIA tampoco distingue
+# ==========================================================================
+async def test_un_resolutor_que_revienta_responde_como_los_otros_tres() -> None:
+    """Lo levanto Crisol: un 500 vuelve a ser un oraculo.
+
+    Si el resolutor falla —base caida, tiempo agotado— y la excepcion sube, la
+    respuesta es un 500. Y entonces los dominios que **exigen** consultar la base
+    se distinguen de los que se descartan antes: la averia dice lo que RF-60
+    calla. Aqui un fallo del resolutor pesa lo mismo que los otros tres casos.
+    """
+
+    async def resolutor_roto(dominio: str) -> EstadoDeDominio:
+        raise RuntimeError("la base no contesta")
+
+    aplicacion = _aplicacion(
+        EstadoDeDominio.DESCONOCIDO, resolutor_de_dominio=resolutor_roto
+    )
+    async with _cliente(aplicacion, DOMINIOS[EstadoDeDominio.SUSPENDIDO]) as cliente:
+        respuesta = await cliente.get(RUTA_DEL_PORTAL)
+
+    codigo, cuerpo, _ = await _huella(EstadoDeDominio.DESCONOCIDO)
+    assert (respuesta.status_code, respuesta.text) == (codigo, cuerpo), (
+        f"con el resolutor caido la respuesta fue {respuesta.status_code}/"
+        f"{respuesta.text!r} y los casos normales dan {codigo}/{cuerpo!r}. La averia "
+        "distingue, o sea que basta con tumbar la base para enumerar la cartera"
+    )
+
+
+# ==========================================================================
 # Guards estructurales: que la fuga NO se pueda reintroducir por descuido
 # ==========================================================================
 def test_la_excepcion_no_puede_llevar_un_motivo_dentro() -> None:
