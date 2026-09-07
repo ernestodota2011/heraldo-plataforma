@@ -49,6 +49,7 @@ from app.main import (
     origenes_declarados,
     validar_origen,
 )
+from app.superficie_publica import ExposicionDeDocumentacion
 from app.tenancy import crear_motor
 from conftest import RAIZ
 from test_escalada_alcance import _fuentes_de_la_aplicacion
@@ -80,6 +81,8 @@ def _aplicacion_de_prueba(**extras: Any):
     parametros: dict[str, Any] = {
         "entorno": Entorno.PRODUCCION,
         "origenes": (ORIGEN_DECLARADO,),
+        # T-033: la exposicion del mapa se declara SIEMPRE; sin ella no se arranca.
+        "exposicion_de_documentacion": ExposicionDeDocumentacion.APAGADA,
     }
     parametros.update(extras)
     return crear_aplicacion(**parametros)

@@ -49,6 +49,13 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from starlette.middleware.cors import CORSMiddleware
 
 from app.health import crear_router_de_salud
+from app.superficie_publica import (
+    CabecerasDeSeguridad,
+    ExposicionDeDocumentacion,
+    PoliticaDeCabeceras,
+    exposicion_declarada,
+    montar_documentacion,
+)
 from app.tenancy import Inquilino, crear_motor, sesion_de_inquilino
 from app.tenancy.confirmacion import (
     ConfirmacionInvalida,
@@ -285,6 +292,10 @@ class Superficie:
     motor: AsyncEngine
     proveedor_de_inquilino: ProveedorDeInquilino
     registrador: Registrador
+    #: T-033 / RF-61 — quien puede ver el mapa de la interfaz. Es una DECISION.
+    exposicion_de_documentacion: ExposicionDeDocumentacion
+    #: T-033 / RF-61 — lo que sale en toda respuesta de ESTA superficie.
+    politica_de_cabeceras: PoliticaDeCabeceras
 
 
 @dataclass(frozen=True, slots=True)
@@ -369,6 +380,7 @@ def crear_aplicacion(
     proveedor_de_inquilino: ProveedorDeInquilino = identidad_no_cableada,
     registrador: Registrador = bitacora_no_cableada,
     tiempo_limite_de_salud: float | None = None,
+    exposicion_de_documentacion: ExposicionDeDocumentacion | None = None,
 ) -> FastAPI:
     """Fabrica de la aplicacion. Todo lo que puede fallar, falla AQUI.
 
@@ -383,9 +395,25 @@ def crear_aplicacion(
     else:
         origenes_reales = tuple(validar_origen(o, entorno_real) for o in origenes)
 
+    # T-033 / RF-61 — la exposicion del mapa se DECLARA. Si no viene por parametro
+    # sale del ambiente, y si tampoco esta ahi el arranque se niega: no hay caida
+    # a «publica», que es el valor por defecto del marco (ver `superficie_publica`).
+    exposicion_real = (
+        exposicion_de_documentacion
+        if exposicion_de_documentacion is not None
+        else exposicion_declarada()
+    )
+
+    # WHY (`docs_url=None` y companeras, SIEMPRE): el camino por defecto de esta
+    # fabrica es el cerrado. Las tres rutas del mapa las vuelve a montar
+    # `montar_documentacion` y solo si la decision lo dice, asi que abrirlas cuesta
+    # una linea explicita en vez de ser lo que pasa cuando nadie mira.
     aplicacion = FastAPI(
         title="Heraldo",
         summary="Plataforma multi-inquilino de agentes en marca blanca",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
     )
     aplicacion.state.superficie = Superficie(
         entorno=entorno_real,
@@ -393,6 +421,11 @@ def crear_aplicacion(
         motor=motor if motor is not None else crear_motor(),
         proveedor_de_inquilino=proveedor_de_inquilino,
         registrador=registrador,
+        exposicion_de_documentacion=exposicion_real,
+        # HSTS solo donde hay TLS. Ver el WHY de `CABECERA_HSTS`.
+        politica_de_cabeceras=PoliticaDeCabeceras(
+            exigir_transporte_seguro=entorno_real is not Entorno.DESARROLLO
+        ),
     )
 
     # WHY: `allow_origins` con la lista literal y NUNCA `allow_origin_regex`. El
@@ -405,6 +438,14 @@ def crear_aplicacion(
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
         max_age=600,
+    )
+
+    # T-033 / RF-61 — el ULTIMO en anadirse es el MAS EXTERNO en `starlette`, y por
+    # eso va aqui: asi tambien alcanza a la respuesta que el corte de CORS produce
+    # sin llegar a ninguna ruta. Ver el WHY de `CabecerasDeSeguridad`.
+    aplicacion.add_middleware(
+        CabecerasDeSeguridad,
+        politica=aplicacion.state.superficie.politica_de_cabeceras,
     )
 
     salud = crear_router_de_salud(
@@ -455,5 +496,8 @@ def crear_aplicacion(
                 ),
             )
         return {"destruido": operacion.inventario.como_dict()}
+
+    # T-033 / RF-61 — el mapa, al final y solo si la decision lo dice.
+    montar_documentacion(aplicacion, exposicion=exposicion_real)
 
     return aplicacion

@@ -30,6 +30,7 @@ import pytest
 from sqlalchemy import text
 
 from app.main import Entorno, confirmacion_de_operacion_destructiva, crear_aplicacion
+from app.superficie_publica import ExposicionDeDocumentacion
 from app.tenancy import Inquilino, crear_motor, sesion_de_inquilino
 from app.tenancy.confirmacion import (
     COLUMNA_IDENTIDAD_DEL_CLIENTE,
@@ -233,6 +234,8 @@ def _aplicacion(motor, inquilino: Inquilino, **extras: Any):
         "origenes": (ORIGEN_DECLARADO,),
         "motor": motor,
         "proveedor_de_inquilino": _identidad(inquilino),
+        # T-033: la exposicion del mapa se declara SIEMPRE; sin ella no se arranca.
+        "exposicion_de_documentacion": ExposicionDeDocumentacion.APAGADA,
     }
     parametros.update(extras)
     return crear_aplicacion(**parametros)
@@ -601,7 +604,10 @@ async def test_sin_identidad_cableada_la_ruta_ni_siquiera_inventaria(
     """El alcance sale de la fila del usuario, y ese camino aun no existe (T-015)."""
     antes = _censo(motor_admin)
     aplicacion = crear_aplicacion(
-        entorno=Entorno.PRODUCCION, origenes=(ORIGEN_DECLARADO,), motor=motor
+        entorno=Entorno.PRODUCCION,
+        origenes=(ORIGEN_DECLARADO,),
+        motor=motor,
+        exposicion_de_documentacion=ExposicionDeDocumentacion.APAGADA,
     )
     async with _cliente_http(aplicacion) as cliente:
         respuesta = await cliente.delete(f"/clientes/{CLIENTE_A1}")
@@ -656,6 +662,7 @@ def _aplicacion_para_inspeccionar():
         entorno=Entorno.PRODUCCION,
         origenes=(ORIGEN_DECLARADO,),
         motor=crear_motor(DSN_INALCANZABLE),
+        exposicion_de_documentacion=ExposicionDeDocumentacion.APAGADA,
     )
 
 
