@@ -175,6 +175,7 @@ jobs:
           apps/api/tests/test_publicable.py
           apps/api/tests/test_egreso_red.py
           apps/api/tests/test_cabeceras.py
+          apps/api/tests/test_enumeracion_inquilinos.py
 
       - name: Suite
         run: uv run --no-sync pytest
