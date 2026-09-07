@@ -65,6 +65,12 @@ from app.tenancy.confirmacion import (
     exigir_confirmacion,
     inventariar_baja_de_cliente,
 )
+from app.tenancy.dominio_desconocido import (
+    DominioNoReconocido,
+    ResolutorDeDominio,
+    manejar_dominio_no_reconocido,
+    sin_registro_de_dominios,
+)
 from app.tenancy.inquilino import Alcance
 
 # ---------------------------------------------------------------------------
@@ -296,6 +302,9 @@ class Superficie:
     exposicion_de_documentacion: ExposicionDeDocumentacion
     #: T-033 / RF-61 — lo que sale en toda respuesta de ESTA superficie.
     politica_de_cabeceras: PoliticaDeCabeceras
+    #: T-032 / RF-60 — quien dice si un dominio se atiende. Falla cerrado por
+    #: defecto: sin registro, ningun dominio se atiende.
+    resolutor_de_dominio: ResolutorDeDominio
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,6 +390,7 @@ def crear_aplicacion(
     registrador: Registrador = bitacora_no_cableada,
     tiempo_limite_de_salud: float | None = None,
     exposicion_de_documentacion: ExposicionDeDocumentacion | None = None,
+    resolutor_de_dominio: ResolutorDeDominio = sin_registro_de_dominios,
 ) -> FastAPI:
     """Fabrica de la aplicacion. Todo lo que puede fallar, falla AQUI.
 
@@ -426,6 +436,14 @@ def crear_aplicacion(
         politica_de_cabeceras=PoliticaDeCabeceras(
             exigir_transporte_seguro=entorno_real is not Entorno.DESARROLLO
         ),
+        resolutor_de_dominio=resolutor_de_dominio,
+    )
+
+    # T-032 / RF-60 — el manejador vive en la aplicacion, no en cada ruta: asi la
+    # respuesta la fabrica UN solo sitio y los tres casos no atendidos no pueden
+    # divergir aunque alguien anada una compuerta nueva manana.
+    aplicacion.add_exception_handler(
+        DominioNoReconocido, manejar_dominio_no_reconocido
     )
 
     # WHY: `allow_origins` con la lista literal y NUNCA `allow_origin_regex`. El
