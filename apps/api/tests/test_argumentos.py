@@ -370,6 +370,17 @@ def test_un_argumento_rechazado_rechaza_la_llamada_entera_y_nombra_el_campo() ->
     assert e.value.campo == "url"
 
 
+def test_una_clave_del_catalogo_que_no_coincide_con_el_nombre_declarado_no_autoriza() -> None:
+    # WHY (lo levanto Crisol): un catalogo {"otro": declaracion_de_buscar_pedido} declara dos
+    # nombres para una herramienta; ninguno de los dos vale. La comprobacion vive donde se
+    # decide (autorizar), y falla cerrado.
+    catalogo = {"otro": BUSCAR_PEDIDO}
+    for nombre in ("otro", "buscar_pedido"):
+        with pytest.raises(LlamadaRechazada) as e:
+            autorizar_llamada(catalogo, LlamadaPropuesta(nombre, PEDIDO_VALIDO), TURNO)
+        assert e.value.motivo is MotivoDeRechazo.HERRAMIENTA_NO_DECLARADA
+
+
 def test_el_nombre_de_la_herramienta_pedida_no_se_normaliza() -> None:
     for nombre in ("Crear_ticket", "crear_ticket ", "crear_ticket/../enviar_correo"):
         with pytest.raises(LlamadaRechazada):
