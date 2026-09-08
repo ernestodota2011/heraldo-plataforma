@@ -194,6 +194,26 @@ def test_el_tipo_se_comprueba_y_bool_no_es_numero(
     assert e.value.campo == campo
 
 
+@pytest.mark.parametrize("valor", [float("nan"), float("inf"), float("-inf")])
+def test_un_decimal_no_finito_se_rechaza(valor: float) -> None:
+    # WHY (lo levanto Crisol): el `json` de Python acepta `NaN` e `Infinity`; un decimal asi
+    # no viaja a ninguna herramienta de forma interoperable y puede reventarla al llegar.
+    with pytest.raises(ArgumentoRechazado) as e:
+        validar_argumentos(MEDIR, {"valor": valor, "activo": True, "nombre": "a"})
+    assert _motivo(e) is MotivoDeRechazo.TIPO
+
+
+def test_los_indicadores_de_la_declaracion_son_booleanos_y_el_tope_no_es_bool() -> None:
+    with pytest.raises(DeclaracionInvalida):
+        FormaDeArgumento(TipoDeArgumento.ENTERO, obligatorio="si")  # type: ignore[arg-type]
+    with pytest.raises(DeclaracionInvalida):
+        FormaDeArgumento(
+            TipoDeArgumento.TEXTO, tope_de_longitud=10, texto_libre=1  # type: ignore[arg-type]
+        )
+    with pytest.raises(DeclaracionInvalida):
+        FormaDeArgumento(TipoDeArgumento.TEXTO, tope_de_longitud=True)  # type: ignore[arg-type]
+
+
 def test_control_un_decimal_acepta_enteros_y_flotantes() -> None:
     for valor in (1, 1.5):
         validados = validar_argumentos(MEDIR, {"valor": valor, "activo": False, "nombre": "a"})

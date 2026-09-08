@@ -28,6 +28,7 @@ enumeracion, tope de longitud, patron— y (3) el texto libre lo rellena el turn
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -95,6 +96,10 @@ class FormaDeArgumento:
     def __post_init__(self) -> None:
         if not isinstance(self.tipo, TipoDeArgumento):
             raise DeclaracionInvalida("el tipo tiene que ser un TipoDeArgumento")
+        # WHY (lo levanto Crisol): `obligatorio="si"` es verdadero y `texto_libre=1` tambien;
+        # una declaracion que acepta eso declara algo distinto de lo que el operador escribio.
+        if type(self.obligatorio) is not bool or type(self.texto_libre) is not bool:
+            raise DeclaracionInvalida("obligatorio y texto_libre son booleanos")
         es_texto = self.tipo is TipoDeArgumento.TEXTO
         es_enumeracion = self.tipo is TipoDeArgumento.ENUMERACION
         if self.texto_libre and not es_texto:
@@ -102,7 +107,8 @@ class FormaDeArgumento:
         if self.texto_libre and (self.tope_de_longitud is not None or self.patron is not None):
             raise DeclaracionInvalida("el texto libre no lleva forma: ni tope ni patron")
         if es_texto and not self.texto_libre:
-            if not isinstance(self.tope_de_longitud, int) or self.tope_de_longitud < 1:
+            tope = self.tope_de_longitud
+            if isinstance(tope, bool) or not isinstance(tope, int) or tope < 1:
                 raise DeclaracionInvalida("un texto con forma exige un tope de longitud")
             if self.patron is not None:
                 try:
@@ -164,6 +170,10 @@ def _validar_valor(campo: str, forma: FormaDeArgumento, valor: object) -> object
         return valor
     if tipo is TipoDeArgumento.DECIMAL:
         if isinstance(valor, bool) or not isinstance(valor, int | float):
+            raise ArgumentoRechazado(campo, MotivoDeRechazo.TIPO)
+        # WHY (lo levanto Crisol): el `json` de Python acepta NaN e Infinity; ninguna
+        # herramienta los recibe de forma interoperable, y un NaN pasa todo `<`/`>`.
+        if isinstance(valor, float) and not math.isfinite(valor):
             raise ArgumentoRechazado(campo, MotivoDeRechazo.TIPO)
         return valor
     if tipo is TipoDeArgumento.BOOLEANO:
