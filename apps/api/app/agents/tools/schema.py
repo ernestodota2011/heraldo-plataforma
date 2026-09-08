@@ -152,6 +152,8 @@ class LlamadaAutorizada:
     herramienta: str
     argumentos: dict[str, object]
     desvios: tuple[Desvio, ...]
+    #: Campos de texto libre que se cortaron por el tope. Constancia para la bitacora.
+    truncados: tuple[str, ...] = ()
 
 
 def _validar_valor(campo: str, forma: FormaDeArgumento, valor: object) -> object:
@@ -218,5 +220,8 @@ def autorizar_llamada(
         raise LlamadaRechazada(llamada.herramienta, rechazo.motivo, rechazo.campo) from rechazo
     relleno = rellenar_texto_libre(declaracion, llamada.argumentos, turno)
     return LlamadaAutorizada(
-        llamada.herramienta, {**validados, **relleno.argumentos}, relleno.desvios
+        llamada.herramienta,
+        {**validados, **relleno.argumentos},
+        relleno.desvios,
+        relleno.truncados,
     )

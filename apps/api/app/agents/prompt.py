@@ -67,8 +67,21 @@ class Papel(StrEnum):
 
 @dataclass(frozen=True)
 class Mensaje:
+    """Un mensaje del contexto. Se valida al nacer: un papel de texto no es un Papel.
+
+    # WHY: `Papel` es un StrEnum, asi que `"sistema" == Papel.SISTEMA` es verdadero pero
+    # `"sistema" is Papel.SISTEMA` es falso. Sin esta validacion, un `Mensaje("sistema", …)`
+    # en el historial esquivaba el rechazo del sistema Y el marcado del usuario, y entraba
+    # al contexto tal cual — un adaptador de proveedor lo habria mapeado al papel de sistema.
+    # Lo levanto Crisol (P-50); la suite lo daba por bueno.
+    """
+
     papel: Papel
     contenido: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.papel, Papel) or not isinstance(self.contenido, str):
+            raise TypeError("un Mensaje lleva un Papel (no texto) y un contenido de texto")
 
 
 @dataclass(frozen=True)

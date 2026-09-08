@@ -268,6 +268,13 @@ def test_cambiar_de_rol_desde_el_historial_tampoco_toca_el_sistema() -> None:
     assert viejo.contenido.count(PAYLOAD_DE_ROL) == 1
 
 
+def test_cambiar_de_rol_colando_un_sistema_de_texto_en_el_historial_no_construye() -> None:
+    # "sistema" == Papel.SISTEMA pero no ES Papel.SISTEMA: el atajo que un adaptador de
+    # proveedor podria mapear al papel de sistema. No llega ni a existir (P-50).
+    with pytest.raises(TypeError):
+        Mensaje("sistema", PAYLOAD_DE_ROL)  # type: ignore[arg-type]
+
+
 # --------------------------------------------------------------------------
 # La bateria se audita a si misma: los TRES objetivos tienen casos, y mas de uno.
 # --------------------------------------------------------------------------

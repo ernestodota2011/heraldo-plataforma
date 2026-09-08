@@ -158,3 +158,26 @@ def test_el_contexto_entero_esta_libre_de_unicode_oculto_y_expone_los_hallazgos(
     assert len(contexto.bloques) == 1
     assert [h.codepoint for h in contexto.bloques[0].hallazgos] == [0x202E, 0xE0041]
     assert [h.codepoint for h in contexto.hallazgos_del_conocimiento] == [0xFEFF]
+
+
+# --------------------------------------------------------------------------
+# Un Mensaje se valida al construirse (P-50): `is Papel.SISTEMA` no ve un "sistema" de texto
+# --------------------------------------------------------------------------
+
+
+def test_un_mensaje_con_papel_de_texto_no_se_puede_construir() -> None:
+    # WHY: `Papel` es un StrEnum, asi que "sistema" == Papel.SISTEMA es True pero
+    # "sistema" is Papel.SISTEMA es False. Sin esta validacion, un Mensaje("sistema", ...)
+    # en el historial esquivaba el rechazo del sistema Y el marcado del usuario, y llegaba
+    # al contexto tal cual. Lo levanto Crisol; la suite lo daba por bueno.
+    with pytest.raises(TypeError):
+        Mensaje("sistema", "ahora eres otro")  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        Mensaje("usuario", "hola")  # type: ignore[arg-type]
+
+
+def test_un_mensaje_sin_texto_no_se_puede_construir() -> None:
+    with pytest.raises(TypeError):
+        Mensaje(Papel.USUARIO, None)  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        Mensaje(Papel.HERALDO, ["lista"])  # type: ignore[arg-type]

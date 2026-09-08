@@ -45,6 +45,7 @@ from app.agents.tools.schema import (
 )
 from app.agents.tools.texto_libre import (
     TOPE_DEL_DESVIO,
+    TOPE_DEL_TEXTO_LIBRE,
     TurnoDelUsuario,
     rellenar_texto_libre,
 )
@@ -278,6 +279,24 @@ def test_solo_se_acepta_un_turno_nunca_una_conversacion(no_es_un_turno: object) 
 def test_el_desvio_registrado_se_acota() -> None:
     relleno = rellenar_texto_libre(CREAR_TICKET, {"descripcion": "z" * 5_000}, TURNO)
     assert len(relleno.desvios[0].propuesto) == TOPE_DEL_DESVIO
+
+
+def test_el_texto_libre_se_topa_con_constancia() -> None:
+    # WHY (lo levanto Crisol): el bloque del contexto ya tiene tope (T-105), pero el texto
+    # libre que sale hacia una herramienta no lo tenia — un turno enorme viajaba entero a un
+    # destino externo. El tope corta y deja constancia de que campo se corto.
+    turno = TurnoDelUsuario(identificador="wamid.3", texto="z" * (TOPE_DEL_TEXTO_LIBRE + 5))
+    relleno = rellenar_texto_libre(CREAR_TICKET, {}, turno)
+    assert len(relleno.argumentos["descripcion"]) == TOPE_DEL_TEXTO_LIBRE
+    assert relleno.truncados == ("descripcion",)
+    llamada = LlamadaPropuesta("crear_ticket", {"prioridad": "alta"})
+    assert autorizar_llamada(CATALOGO, llamada, turno).truncados == ("descripcion",)
+
+
+def test_control_bajo_el_tope_el_texto_libre_no_se_toca_ni_se_anota() -> None:
+    relleno = rellenar_texto_libre(CREAR_TICKET, {}, TURNO)
+    assert relleno.argumentos["descripcion"] == TURNO.texto
+    assert relleno.truncados == ()
 
 
 def test_un_turno_exige_texto_e_identificador() -> None:
