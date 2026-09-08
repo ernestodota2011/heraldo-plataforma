@@ -176,6 +176,10 @@ jobs:
           apps/api/tests/test_egreso_red.py
           apps/api/tests/test_cabeceras.py
           apps/api/tests/test_enumeracion_inquilinos.py
+          apps/api/tests/test_no_confiable.py
+          apps/api/tests/test_argumentos.py
+          apps/api/tests/test_prompt.py
+          apps/api/tests/test_inyeccion.py
 
       - name: Suite
         run: uv run --no-sync pytest

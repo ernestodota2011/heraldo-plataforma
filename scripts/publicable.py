@@ -157,13 +157,47 @@ def _archivos_versionados() -> list[str]:
     return [linea for linea in salida.splitlines() if linea.strip()]
 
 
+_CONTROLES_PERMITIDOS = frozenset("\n\t\r")
+
+
+def unicode_oculto(texto: str) -> list[tuple[int, int, str]]:
+    """(linea, codepoint, nombre) por cada caracter de formato o de control que nadie ve.
+
+    WHY: un caracter bidi o de ancho cero dentro de un archivo fuente hace que el codigo
+    se EJECUTE distinto de como se LEE (Trojan Source, CVE-2021-42574), y el diff de un
+    revisor no lo muestra. Este repositorio contiene ademas el modulo que neutraliza esos
+    caracteres en el texto de los usuarios (`app/agents/untrusted.py`), y sus pruebas los
+    escriben como escapes, nunca como literales — la unica forma de que eso se sostenga es
+    que el gate lo mida. Nacio de P-49: los literales entraron, y solo los vio el IDE.
+    Medido al anadirlo: 0 apariciones en los 82 archivos versionados.
+
+    WHY (por que aplica tambien a los archivos EXENTOS del guard de terminos): la exencion
+    existe para fixtures que CONTIENEN terminos prohibidos a proposito; un caracter
+    invisible no tiene ese uso legitimo. Un fixture que lo necesite lo construye en tiempo
+    de ejecucion con `chr()`.
+    """
+    faltas: list[tuple[int, int, str]] = []
+    numero = 1
+    for caracter in texto:
+        if caracter == "\n":
+            numero += 1
+            continue
+        categoria = unicodedata.category(caracter)
+        if categoria in ("Cf", "Cc") and caracter not in _CONTROLES_PERMITIDOS:
+            faltas.append((numero, ord(caracter), unicodedata.name(caracter, "SIN NOMBRE")))
+    return faltas
+
+
 def revisar_texto(texto: str, origen: str, exento: bool = False) -> list[str]:
     """Devuelve las faltas. Nombra el ORIGEN y la clase, jamas el termino.
 
     WHY: el informe de este gate acaba en un log de CI publico. Si dijera cual es
     la palabra encontrada, el propio aviso publicaria lo que el gate protege.
     """
-    faltas: list[str] = []
+    faltas: list[str] = [
+        f"{origen}:{numero}: unicode oculto U+{codepoint:04X} {nombre}"
+        for numero, codepoint, nombre in unicode_oculto(texto)
+    ]
     for numero, linea in enumerate(texto.splitlines(), 1):
         for palabra in _PALABRA.findall(linea):
             clase = TERMINOS_PROHIBIDOS.get(huella(palabra))
