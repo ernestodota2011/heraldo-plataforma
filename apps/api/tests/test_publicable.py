@@ -135,3 +135,50 @@ def test_ninguna_exencion_esta_muerta() -> None:
 def test_el_gate_encuentra_archivos_que_revisar() -> None:
     """El control del control: con la lista vacia, todo lo anterior pasaria vacio."""
     assert len(_gate()._archivos_versionados()) >= 20
+
+
+# --------------------------------------------------------------------------
+# Unicode oculto en el arbol (P-49): el codigo se lee como se ejecuta
+# --------------------------------------------------------------------------
+#
+# WHY (por que los caracteres se construyen con `chr()` y no se escriben): este archivo
+# es parte del arbol que el gate revisa. Un literal invisible aqui lo detectaria el propio
+# gate en `test_el_arbol_publicado_esta_limpio`, que es exactamente lo que queremos que
+# pase con cualquier otro archivo.
+
+
+def test_un_caracter_invisible_se_detecta_y_se_nombra_por_codepoint() -> None:
+    texto = "x = 1\nif usuario " + chr(0x202E) + "== 'admin':\n"
+    assert _gate().revisar_texto(texto, "a.py") == [
+        "a.py:2: unicode oculto U+202E RIGHT-TO-LEFT OVERRIDE"
+    ]
+
+
+@pytest.mark.parametrize("codepoint", [0x200B, 0x200D, 0xFEFF, 0xE0041, 0x00AD, 0x1B])
+def test_cada_familia_de_oculto_se_detecta(codepoint: int) -> None:
+    faltas = _gate().revisar_texto("a" + chr(codepoint) + "b\n", "a.py")
+    assert len(faltas) == 1
+    assert f"unicode oculto U+{codepoint:04X}" in faltas[0]
+
+
+def test_el_texto_limpio_con_acentos_y_emoji_no_dispara() -> None:
+    # VARIATION SELECTOR-16 (el de los emoji) es categoria Mn, no Cf: no es invisible
+    # en el sentido que importa aqui, y los docs lo usan.
+    texto = "caf" + chr(0xE9) + " " + chr(0x26A0) + chr(0xFE0F) + " " + chr(0x1F600) + "\n"
+    assert [f for f in _gate().revisar_texto(texto, "docs/x.md") if "oculto" in f] == []
+
+
+def test_la_exencion_de_terminos_no_exime_del_unicode_oculto() -> None:
+    texto = "fixture" + chr(0x200B) + "\n"
+    assert _gate().revisar_texto(texto, "a.py", exento=True) != []
+
+
+def test_el_control_del_arbol_mide_unicode_oculto_de_verdad(tmp_path, monkeypatch) -> None:
+    # El sabotaje en vivo: un archivo con un caracter invisible dentro del arbol que el
+    # gate revisa tiene que ponerlo en rojo. Sin esto, `test_el_arbol_publicado_esta_limpio`
+    # podria estar verde porque la regla no mira, no porque el arbol este limpio.
+    gate = _gate()
+    (tmp_path / "sucio.py").write_text("x = 1" + chr(0x202E) + "\n", encoding="utf-8")
+    monkeypatch.setattr(gate, "RAIZ", tmp_path)
+    monkeypatch.setattr(gate, "_archivos_versionados", lambda: ["sucio.py"])
+    assert any("unicode oculto U+202E" in f for f in gate.revisar_arbol())
