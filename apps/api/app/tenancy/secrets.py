@@ -286,7 +286,10 @@ async def leer(conexion, inquilino: Inquilino, *, nombre: str, clave: bytes) -> 
 #: exista: una tabla nueva sin declaracion no «sale como venga», no sale.
 CAMPOS_PUBLICOS: dict[str, frozenset[str]] = {
     "agencias": frozenset({"agencia_id", "nombre", "creada_en"}),
-    "clientes": frozenset({"id", "agencia_id", "nombre", "creado_en"}),
+    # `desarrollo` (T-100, B4) es publico a proposito: el panel tiene que poder
+    # enseñar que alta consume la clave de agencia. Lo que NO sale es el sector
+    # persistido —es clasificacion del guard de RNF-04, no ficha de cliente.
+    "clientes": frozenset({"id", "agencia_id", "nombre", "creado_en", "desarrollo"}),
     "heraldos": frozenset({"id", "agencia_id", "cliente_id", "nombre", "creado_en"}),
     "secretos": frozenset(
         {"id", "agencia_id", "cliente_id", "nombre", "creado_en", "actualizado_en"}
