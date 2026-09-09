@@ -112,6 +112,13 @@ SQL_DESTRUCTIVA_PERMITIDA: dict[str, str] = {
         "no hace DDL — no tiene CREATE sobre el esquema ni es duena de ninguna "
         "tabla, y las dos cosas las comprueba `test_rls_cobertura.py`"
     ),
+    "apps/api/migrations/versions/0005_la_marca_de_desarrollo.py": (
+        "DDL de migracion, igual que la 0004: su `DROP COLUMN` esta en el "
+        "`downgrade()` y lo ejecuta el rol MIGRADOR sobre el esquema. Deshacerla "
+        "quita la marca `desarrollo` y con ella la excepcion a BYOK (B4): todo "
+        "cliente vuelve a ser real y ninguno consume la clave de agencia — es la "
+        "direccion segura, no una perdida de datos de cliente"
+    ),
 }
 
 

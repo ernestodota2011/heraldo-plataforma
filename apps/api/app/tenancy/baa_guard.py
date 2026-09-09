@@ -351,8 +351,14 @@ async def alta_de_cliente(
     sector: object,
     descripcion: str = "",
     cliente_id: UUID | None = None,
+    desarrollo: bool = False,
 ) -> UUID:
     """Da de alta un cliente. Es el UNICO camino que escribe la tabla `clientes`.
+
+    `desarrollo` (T-100, B4) marca un alta operada por la propia agencia —sin
+    version publicada, sin datos de personas reales, sin numero real de canal—
+    y es la UNICA puerta a la clave de agencia. Por defecto `False`: un cliente del
+    que nadie dijo «es de desarrollo» es real, y un cliente real no la toca.
 
     Cuatro cosas, en este orden y sin forma de saltarse ninguna:
 
@@ -385,14 +391,19 @@ async def alta_de_cliente(
         # fila clasificada.
         await conexion.execute(
             text(
-                "INSERT INTO clientes (id, agencia_id, nombre, sector, sector_verificado_en) "
-                "VALUES (:id, :agencia, :nombre, :sector, now())"
+                "INSERT INTO clientes "
+                "(id, agencia_id, nombre, sector, sector_verificado_en, desarrollo) "
+                "VALUES (:id, :agencia, :nombre, :sector, now(), :desarrollo)"
             ),
             {
                 "id": nuevo,
                 "agencia": sesion.agencia_id,
                 "nombre": nombre,
                 "sector": declarado.value,
+                # `bool(...)` a proposito: un «desarrollo» que llegue como cadena
+                # ("false") es verdadero en Python y marcaria de desarrollo un
+                # alta real. Aqui solo entra el booleano, y la fila lo dice.
+                "desarrollo": desarrollo is True,
             },
         )
     return nuevo
