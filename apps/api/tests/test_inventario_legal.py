@@ -884,3 +884,22 @@ def test_ningun_literal_del_espacio_de_nombres_vive_fuera_de_su_constante(guion)
         f"hay literales del espacio de nombres fuera de una constante PREFIJO*: {sueltos}. "
         "Una familia de claves declarada a mano no entra en el inventario"
     )
+
+
+def test_un_modulo_de_salida_anidado_tampoco_se_escapa(guion, tmp_path) -> None:
+    """Un subpaquete dentro del punto de salida es un camino de salida igual.
+
+    # WHY: mirando solo el primer nivel, `packages/egress/mensajes/…` —que es la
+    # forma que tendrá la salida de mensajes de T-119— no se veía, y el
+    # inventario habría seguido afirmando que no hay más caminos de salida.
+    """
+    egreso = tmp_path / "packages" / "egress" / "mensajes"
+    egreso.mkdir(parents=True)
+    (tmp_path / "packages" / "egress" / "red.py").write_text("", encoding="utf-8")
+    (egreso / "whatsapp.py").write_text("", encoding="utf-8")
+
+    vistos = guion.modulos_de_salida(tmp_path)
+    assert "mensajes/whatsapp" in vistos, (
+        f"el barrido no vio un modulo de salida anidado; vio {vistos}"
+    )
+    assert sorted(set(vistos) - guion.MODULOS_DE_SALIDA_CONOCIDOS) == ["mensajes/whatsapp"]

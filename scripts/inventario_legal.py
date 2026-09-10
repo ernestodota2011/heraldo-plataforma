@@ -316,11 +316,22 @@ def artefactos_de_navegador(raiz: Path = RAIZ) -> list[str]:
 
 
 def modulos_de_salida(raiz: Path = RAIZ) -> list[str]:
-    """Los modulos del punto unico de salida, leidos del arbol."""
+    """Los modulos del punto unico de salida, leidos del arbol — TODO el arbol.
+
+    # WHY (`rglob` y no `glob`): mirando solo el primer nivel, un subpaquete
+    # —`packages/egress/mensajes/…`, que es justo la forma que tendria la salida
+    # de mensajes de T-119— no se veia, y el inventario habria seguido diciendo
+    # que no hay mas caminos de salida. El universo de la medida se deriva
+    # entero, o mide menos sin fallar (P-52).
+    """
     paquete = raiz / "packages" / "egress"
     if not paquete.is_dir():
         return []
-    return sorted(archivo.stem for archivo in paquete.glob("*.py"))
+    return sorted(
+        archivo.relative_to(paquete).with_suffix("").as_posix()
+        for archivo in paquete.rglob("*.py")
+        if "__pycache__" not in archivo.parts
+    )
 
 
 #: Como se llama la funcion del punto unico de salida.
