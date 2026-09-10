@@ -331,6 +331,24 @@ CAMPOS_PUBLICOS: dict[str, frozenset[str]] = {
     "mensajes_entrantes": frozenset(
         {"id", "agencia_id", "cliente_id", "canal", "id_externo", "trabajo_id", "recibido_en"}
     ),
+    # WHY (`detalle` NO sale, y no es un olvido): es un `jsonb` libre donde el
+    # llamante mete lo que le convenga —modelo, tokens, pais, tipo de mensaje— y
+    # manana metera otra cosa. Un campo de forma libre es justo el que no se
+    # puede declarar publico: nadie puede prometer hoy que lo que le pongan
+    # manana se pueda enseñar. Lo que el cliente necesita para entender su
+    # factura —cuanto, de que concepto y cuando— si sale.
+    "consumos": frozenset(
+        {
+            "id",
+            "agencia_id",
+            "cliente_id",
+            "heraldo_id",
+            "titular",
+            "concepto",
+            "monto_usd",
+            "registrado_en",
+        }
+    ),
 }
 
 

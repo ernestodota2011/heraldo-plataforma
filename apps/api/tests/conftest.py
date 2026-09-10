@@ -79,6 +79,12 @@ ARCHIVADO_B1 = UUID("bbbbbbbb-0000-4000-8000-00000000e0b1")
 MENSAJE_A1 = UUID("aaaaaaaa-0000-4000-8000-0000000090a1")
 MENSAJE_A2 = UUID("aaaaaaaa-0000-4000-8000-0000000090a2")
 MENSAJE_B1 = UUID("bbbbbbbb-0000-4000-8000-0000000090b1")
+# La fila sembrada de `consumos` (revision 0012). Igual que las cinco de arriba:
+# una por inquilino, porque sin filas de las TRES relaciones media bateria de
+# sondas mediria «no veo nada» sobre una tabla vacia.
+CONSUMO_A1 = UUID("aaaaaaaa-0000-4000-8000-0000000070a1")
+CONSUMO_A2 = UUID("aaaaaaaa-0000-4000-8000-0000000070a2")
+CONSUMO_B1 = UUID("bbbbbbbb-0000-4000-8000-0000000070b1")
 
 #: El nombre del secreto sembrado y su valor EN CLARO. El valor esta aqui a
 #: proposito y no es una credencial: es el testigo que la sonda de CE-06 busca en
@@ -318,6 +324,7 @@ _APUNTE_DE = {"A1": APUNTE_A1, "A2": APUNTE_A2, "B1": APUNTE_B1}
 _TRABAJO_DE = {"A1": TRABAJO_A1, "A2": TRABAJO_A2, "B1": TRABAJO_B1}
 _ARCHIVADO_DE = {"A1": ARCHIVADO_A1, "A2": ARCHIVADO_A2, "B1": ARCHIVADO_B1}
 _MENSAJE_DE = {"A1": MENSAJE_A1, "A2": MENSAJE_A2, "B1": MENSAJE_B1}
+_CONSUMO_DE = {"A1": CONSUMO_A1, "A2": CONSUMO_A2, "B1": CONSUMO_B1}
 
 
 def valor_sembrado_del_secreto(etiqueta: str) -> str:
@@ -393,6 +400,20 @@ def _sembrar_la_base_y_la_cola(conexion) -> None:
             # demuestra que la unicidad es POR INQUILINO — si fuera global, esta
             # siembra reventaria y la suite entera lo diria en el arranque.
             comun | {"id": _MENSAJE_DE[etiqueta], "externo": "mensaje-sembrado"},
+        )
+        # WHY (`monto_usd` minusculo y `registrado_en` MUY en el pasado): esta fila
+        # existe para que la bateria de aislamiento tenga contra que medir, no para
+        # gastar. Con una fecha del mes en curso entraria en la suma del techo y
+        # cada sonda de T-111 arrancaria con una resaca que no puso ella; con una
+        # de 2020 no cae dentro de ninguna ventana que esas pruebas usan.
+        conexion.execute(
+            text(
+                "INSERT INTO consumos (id, agencia_id, cliente_id, titular, concepto, "
+                "       monto_usd, registrado_en) "
+                "VALUES (:id, :a, :c, 'cliente', 'modelo', 0.000001, "
+                "        TIMESTAMPTZ '2020-01-01 00:00:00+00')"
+            ),
+            comun | {"id": _CONSUMO_DE[etiqueta]},
         )
 
 
