@@ -60,7 +60,11 @@ from sqlalchemy import bindparam, text
 from app.audit.bitacora import apuntar, es_actor_opaco
 from app.tenancy.inquilino import Alcance, Inquilino
 from app.tenancy.politicas import ALCANCE_AGENCIA, VARIABLE_ALCANCE
-from app.tenancy.suspension import MOTIVO_REACEPTACION_PENDIENTE, suspender_cliente
+from app.tenancy.suspension import (
+    MOTIVO_REACEPTACION_PENDIENTE,
+    AlcanceSinCliente,
+    suspender_cliente,
+)
 
 
 class Documento(StrEnum):
@@ -109,6 +113,13 @@ _POR_IDS = text(_CATALOGO + " WHERE id IN :ids").bindparams(
 #: pegaba el `WHERE` a mano segun el argumento. Aunque el valor viajaba ligado y no
 #: habia superficie de inyeccion, ese patron es el que invita a que manana alguien
 #: pegue algo que SI venga de fuera. Dos literales completos no dejan sitio.
+#:
+#: # WHY (el desempate por `id` no decide nada, y por que): `id` es un uuid
+#: aleatorio, asi que desempatar por el seria arbitrario. Lo que evita el empate es
+#: la columna: `publicada_en` se llena con `clock_timestamp()`, que avanza DENTRO de
+#: la transaccion — dos versiones del mismo documento publicadas de un tiron tienen
+#: instantes distintos y «cual es la vigente» tiene una sola respuesta. El `id DESC`
+#: se queda como red: hace el orden estable aunque el reloj repitiera.
 _CATALOGO_ENTERO = text(_CATALOGO + " ORDER BY publicada_en DESC, id DESC")
 _CATALOGO_POR_DOCUMENTO = text(
     _CATALOGO + " WHERE documento = :documento ORDER BY publicada_en DESC, id DESC"
@@ -146,6 +157,14 @@ _ULTIMAS_ACEPTACIONES = text(
 
 #: Los clientes ALCANZABLES en esta sesion que no tienen aceptada esa version.
 #: Incluye al que nunca acepto nada: no tenerlo tambien es no tenerlo al dia.
+#:
+#: # WHY (no lleva `AND agencia_id = ...` y eso es DELIBERADO — lo pregunto la
+#: revision cruzada): «alcanzables en esta sesion» lo decide la politica de RLS de
+#: `clientes`, que con alcance agencia devuelve exactamente la cartera de ESA
+#: agencia. Repetir el predicado aqui seria una segunda redaccion del mismo
+#: gobierno, y el dia que las dos discrepen manda la que nadie mira. Lo que si hace
+#: falta es no CREERSELO: `test_el_barrido_no_cruza_la_frontera_entre_agencias` lo
+#: mide con las dos agencias sembradas.
 _CLIENTES_SIN_ESTA_VERSION = text(
     "SELECT c.agencia_id, c.id AS cliente_id FROM clientes c "
     "WHERE NOT EXISTS ("
@@ -243,8 +262,17 @@ async def _exigir_alcance_de_agencia(conexion) -> None:
 
 
 def _exigir_cliente(inquilino: Inquilino) -> None:
+    """Fail-closed, y con el error que de verdad ocurrio.
+
+    # WHY (levanta `AlcanceSinCliente` y no `AceptacionAusente` — lo pregunto la
+    # revision cruzada): esto no es «falta la aceptacion», es «no me has dicho de
+    # quien». Quien capture `AceptacionAusente` para pedirle al operador que acepte
+    # el contrato estaria pidiendo lo que no falta. Se reusa el tipo de
+    # `suspension.py` a proposito: es la misma pregunta —¿que cliente?— y dos
+    # excepciones para ella obligarian a capturar las dos.
+    """
     if inquilino.alcance is not Alcance.CLIENTE:
-        raise AceptacionAusente(
+        raise AlcanceSinCliente(
             "la aceptacion es POR CLIENTE y este inquilino no nombra a ninguno "
             f"(alcance {inquilino.alcance})"
         )

@@ -99,6 +99,16 @@ TABLAS_SQL: tuple[str, ...] = (
     """CREATE INDEX suspensiones_inquilino_idx
     ON suspensiones (agencia_id, cliente_id, suspendida_en)""",
     # ------------------------------------------- RF-66 · catalogo de plataforma
+    # WHY (`publicada_en` con `clock_timestamp()` y NO con `now()`, que es lo que usa
+    # el resto del esquema): `now()` devuelve el instante de la TRANSACCION, igual
+    # para todas las filas que escriba. Aqui esta columna no es decorativa: es la que
+    # ordena el catalogo y decide CUAL es la version vigente, y de eso depende que un
+    # alta se admita. Dos versiones del mismo documento publicadas en una sola
+    # transaccion compartirian instante y la vigente la elegiria el desempate por un
+    # uuid aleatorio. Con el reloj que avanza dentro de la transaccion, el empate no
+    # existe. Donde el instante es del hecho y no del orden —`suspendida_en`,
+    # `aceptada_en`— se queda `now()`, que es lo correcto ahi.
+    #
     # WHY (`documento` con CHECK y no un enum): mismo motivo que `trabajos.estado`
     # en la 0003 — un `CREATE TYPE ... AS ENUM` es un objeto mas del esquema que el
     # gate derivado del catalogo no mira, y anadirle un valor exige `ALTER TYPE`,
@@ -107,7 +117,7 @@ TABLAS_SQL: tuple[str, ...] = (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     documento    text NOT NULL,
     version      text NOT NULL,
-    publicada_en timestamptz NOT NULL DEFAULT now(),
+    publicada_en timestamptz NOT NULL DEFAULT clock_timestamp(),
     declara_instruccion_de_derechos boolean NOT NULL,
     es_desarrollo boolean NOT NULL,
     hash_del_texto text NOT NULL,

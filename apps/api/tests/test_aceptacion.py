@@ -60,7 +60,9 @@ from app.tenancy.baa_guard import Sector, alta_de_cliente
 from app.tenancy.suspension import MOTIVO_REACEPTACION_PENDIENTE, esta_suspendido
 from conftest import (
     AGENCIA_A,
+    AGENCIA_B,
     CLIENTE_A1,
+    CLIENTE_B1,
     RAIZ,
     VERSION_ANEXO_DESARROLLO,
     VERSION_CONTRATO_DESARROLLO,
@@ -409,6 +411,38 @@ async def test_publicar_una_version_deja_pendiente_a_quien_tenia_la_anterior(
     inquilino = sesion_de_cliente(AGENCIA_A, al_dia)
     async with sesion_de_inquilino(motor, inquilino) as conexion:
         assert await esta_suspendido(conexion, inquilino) is False
+
+
+async def test_el_barrido_no_cruza_la_frontera_entre_agencias(motor, agencia) -> None:
+    """El barrido de la agencia A no toca a la cartera de la B (RNF-05).
+
+    # WHY (lo pregunto la revision cruzada, y tenia razon en la mitad util): la
+    # consulta del barrido NO lleva un `AND agencia_id = ...` escrito a mano — eso lo
+    # gobierna la politica de RLS de `clientes`. Que la gobierne no se cree: se mide.
+    # Sin esta sonda, el dia que alguien tocara esa politica el barrido empezaria a
+    # suspender clientes de otra agencia y todo lo demas seguiria verde.
+    """
+    publicada = await _publicar(motor, agencia, Documento.CONTRATO, "2.0", desarrollo=False)
+    avisos = await _barrer(motor, agencia, publicada.publicada_en + timedelta(days=31))
+
+    agencias_tocadas = {aviso.inquilino.agencia_id for aviso in avisos}
+    assert agencias_tocadas == {AGENCIA_A}, (
+        f"el barrido de la agencia A produjo avisos para {sorted(agencias_tocadas)}: "
+        "esta viendo cartera que no es suya"
+    )
+
+    ajeno = sesion_de_cliente(AGENCIA_B, CLIENTE_B1)
+    async with sesion_de_inquilino(motor, ajeno) as conexion:
+        assert await esta_suspendido(conexion, ajeno) is False, (
+            "el barrido de la agencia A suspendio a un cliente de la agencia B: la "
+            "acotacion por agencia no la esta haciendo nadie"
+        )
+    # Control: dentro de SU agencia el barrido si suspendio a alguien, o esta sonda
+    # saldria verde con un barrido que no hace nada.
+    assert any(aviso.suspendido for aviso in avisos), (
+        "el barrido no suspendio a nadie ni siquiera en su propia agencia: la "
+        "comprobacion de arriba no estaria midiendo ninguna frontera"
+    )
 
 
 async def test_cada_pendiente_deja_su_apunte(motor, agencia) -> None:
