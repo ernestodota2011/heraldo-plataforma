@@ -129,6 +129,10 @@ class SalidaNoDeclarada(InventarioIncompleto):
     """Aparecio un modulo de salida nuevo: el inventario no nombra ese destinatario."""
 
 
+class SuperficieNoMedible(InventarioIncompleto):
+    """Una ruta servida lanzo en vez de responder: no se puede decir que emite."""
+
+
 class PrefijoSinInventariar(InventarioIncompleto):
     """Produccion declara una familia de claves que ninguna fila del inventario nombra."""
 
@@ -319,7 +323,8 @@ def modulos_de_salida(raiz: Path = RAIZ) -> list[str]:
     return sorted(archivo.stem for archivo in paquete.glob("*.py"))
 
 
-_LLAMADA_AL_PUNTO_DE_SALIDA = re.compile(r"\bpedir\s*\(")
+#: Como se llama la funcion del punto unico de salida.
+_NOMBRE_DEL_PUNTO_DE_SALIDA = "pedir"
 
 #: Donde vive el codigo que CORRE en produccion. Es el universo del barrido de
 #: llamantes.
@@ -332,6 +337,16 @@ _LLAMADA_AL_PUNTO_DE_SALIDA = re.compile(r"\bpedir\s*\(")
 ARBOL_DE_PRODUCCION: tuple[str, ...] = ("apps/api/app", "apps/worker", "packages")
 
 
+def _ruta_punteada(nodo: ast.expr) -> str:
+    """`egress.red` a partir del arbol de `egress.red.pedir(...)`."""
+    if isinstance(nodo, ast.Name):
+        return nodo.id
+    if isinstance(nodo, ast.Attribute):
+        base = _ruta_punteada(nodo.value)
+        return f"{base}.{nodo.attr}" if base else ""
+    return ""
+
+
 def llamantes_del_punto_de_salida(raiz: Path = RAIZ) -> list[str]:
     """Los modulos de PRODUCCION que LLAMAN al punto unico de salida.
 
@@ -341,6 +356,14 @@ def llamantes_del_punto_de_salida(raiz: Path = RAIZ) -> list[str]:
     # fuera. Un llamador nuevo cambia el inventario y pone en rojo la prueba de
     # divergencia — que es como se entera el piso legal de que hay un
     # destinatario mas.
+    #
+    # # WHY (AST y no una expresion regular): con texto, `from egress.red import
+    # pedir as salir` daba un falso NEGATIVO —una salida real que el inventario
+    # no nombra— y la palabra `pedir(` dentro de un comentario daba un falso
+    # positivo. El falso negativo es el caro, y `test_egreso_red` no lo tapa: ese
+    # guard mira quien IMPORTA un cliente de red, y un alias de `pedir` no
+    # importa ninguno. Aqui se resuelve el import —alias incluido— y se buscan
+    # las LLAMADAS a ese nombre.
     """
     encontrados: list[str] = []
     for carpeta in ARBOL_DE_PRODUCCION:
@@ -348,15 +371,52 @@ def llamantes_del_punto_de_salida(raiz: Path = RAIZ) -> list[str]:
         if not base.is_dir():
             continue
         for archivo in sorted(base.rglob("*.py")):
+            if "__pycache__" in archivo.parts:
+                continue
             relativa = archivo.relative_to(raiz).as_posix()
             if relativa.startswith("packages/egress/"):
                 continue  # es el propio punto de salida
-            texto = archivo.read_text(encoding="utf-8")
-            if "egress.red" not in texto and "from egress import" not in texto:
+            arbol = ast.parse(archivo.read_text(encoding="utf-8"), filename=relativa)
+
+            directos: set[str] = set()  # `pedir(...)`, con su alias
+            modulos: set[str] = set()  # `red.pedir(...)` / `egress.red.pedir(...)`
+            for nodo in ast.walk(arbol):
+                if isinstance(nodo, ast.ImportFrom):
+                    if nodo.module == "egress.red":
+                        directos |= {
+                            alias.asname or alias.name
+                            for alias in nodo.names
+                            if alias.name == _NOMBRE_DEL_PUNTO_DE_SALIDA
+                        }
+                    elif nodo.module == "egress":
+                        modulos |= {
+                            alias.asname or alias.name
+                            for alias in nodo.names
+                            if alias.name == "red"
+                        }
+                elif isinstance(nodo, ast.Import):
+                    modulos |= {
+                        alias.asname or alias.name
+                        for alias in nodo.names
+                        if alias.name == "egress.red"
+                    }
+            if not directos and not modulos:
                 continue
-            if _LLAMADA_AL_PUNTO_DE_SALIDA.search(texto):
-                encontrados.append(relativa)
-    return encontrados
+
+            for nodo in ast.walk(arbol):
+                if not isinstance(nodo, ast.Call):
+                    continue
+                funcion = nodo.func
+                llama = isinstance(funcion, ast.Name) and funcion.id in directos
+                if not llama and isinstance(funcion, ast.Attribute):
+                    llama = (
+                        funcion.attr == _NOMBRE_DEL_PUNTO_DE_SALIDA
+                        and _ruta_punteada(funcion.value) in modulos
+                    )
+                if llama:
+                    encontrados.append(relativa)
+                    break
+    return sorted(encontrados)
 
 
 #: Por que nombre se reconoce, en este arbol, una constante que declara el
@@ -510,6 +570,15 @@ def exigir_catalogo_de_esta_revision(conexion, raiz: Path = RAIZ) -> None:
     # y se dice cual es la diferencia.
     """
     esperada = revision_de_este_repositorio(raiz)
+    if not esperada:
+        # WHY: `get_current_head()` devuelve `None` si no encuentra ninguna
+        # revision. Compararlo contra la del banco producia el mensaje «las
+        # migraciones de este arbol terminan en ''», que manda a mirar el banco
+        # cuando el problema esta AQUI: el arbol no tiene migraciones legibles.
+        raise SinCatalogo(
+            "este arbol no declara ninguna revision `head` de Alembic: no hay con que "
+            "comparar el catalogo del banco. Revisa apps/api/migrations/"
+        )
     aplicada = conexion.execute(
         text(
             "SELECT version_num FROM alembic_version "
@@ -593,15 +662,80 @@ def derivar_datos(conexion, raiz: Path = RAIZ) -> list[dict[str, str]]:
     return filas
 
 
-def _datos_derivados() -> list[dict[str, str]]:
-    """Lo que no es tabla y aun asi son datos: las claves de Redis, por sus constantes.
+#: Marca que se pone en la parte VARIABLE de una clave para poder cortarla. En
+#: minusculas porque el nombre de un limite es una allowlist POR FORMA.
+_SONDA_DE_CLAVE = "sondadeinventario"
 
-    Los prefijos y los plazos se LEEN de los modulos que los declaran. Ninguno se
-    escribe aqui a mano: si alguien cambia una constante, el inventario cambia.
+
+class _RedisQueNoHabla:
+    """Un Redis que no habla. `Limitador` registra su guion al construirse, y de el
+    aqui solo se quiere el constructor de CLAVES, nunca su comportamiento."""
+
+    def register_script(self, guion):  # noqa: ARG002 - la firma es del cliente real
+        return None
+
+
+def _patron_de_clave(construida: str, sonda: str) -> str:
+    """`heraldo:sesion:<sonda>` -> `heraldo:sesion:*`.
+
+    # WHY: el PREFIJO ya se leia de su constante, pero el segmento siguiente
+    # —`idem`, `sesion`, `limite`— estaba escrito a mano aqui. Renombrarlo en su
+    # modulo dejaba este inventario publicando un patron de clave que ya no
+    # existe: una afirmacion falsa sobre que datos hay, que es justo lo que esta
+    # casilla existe para impedir. Ahora el patron sale de LLAMAR al constructor
+    # de claves de verdad y cortar por la sonda — ningun segmento se escribe dos
+    # veces, y si el constructor deja de usar el valor que se le pasa, se cae.
     """
+    cabeza, separador, _ = construida.partition(sonda)
+    if not separador:
+        raise InventarioIncompleto(
+            f"la clave {construida!r} no contiene la sonda que se le paso: el "
+            "constructor de claves dejo de usar ese valor, y el patron publicado "
+            "seria una suposicion en vez de una derivacion"
+        )
+    return cabeza + "*"
+
+
+def patrones_de_clave() -> dict[str, str]:
+    """El patron de cada familia de claves, DERIVADO de quien las construye."""
+    from uuid import UUID
+
+    from app.tenancy.inquilino import Alcance, Inquilino
+
+    sonda = UUID(PARAMETRO_DE_MEDIDA)
+    inquilino = Inquilino(agencia_id=sonda, cliente_id=sonda, alcance=Alcance.CLIENTE)
+    return {
+        "idempotencia": _patron_de_clave(
+            idempotency.clave_de(
+                inquilino, canal=_SONDA_DE_CLAVE, id_externo=_SONDA_DE_CLAVE
+            ),
+            str(sonda),
+        ),
+        "sesion": _patron_de_clave(
+            auth.AlmacenDeSesiones(None).clave(_SONDA_DE_CLAVE), _SONDA_DE_CLAVE
+        ),
+        "limite": _patron_de_clave(
+            limits.LimitadorCompartido(_RedisQueNoHabla()).clave(
+                limits.Limite(nombre=_SONDA_DE_CLAVE, cuota=1, ventana_segundos=1),
+                inquilino,
+                limits.Direccion.desde_texto("203.0.113.7"),
+            ),
+            _SONDA_DE_CLAVE,
+        ),
+    }
+
+
+def _datos_derivados() -> list[dict[str, str]]:
+    """Lo que no es tabla y aun asi son datos: las claves de Redis, DERIVADAS.
+
+    Ni el prefijo ni el resto del patron se escriben aqui: se obtienen llamando a
+    los constructores de claves reales. Si alguien cambia una constante o renombra
+    un segmento, el inventario cambia con el codigo.
+    """
+    patrones = patrones_de_clave()
     return [
         {
-            "nombre": f"{idempotency.PREFIJO}:*",
+            "nombre": patrones["idempotencia"],
             "forma": "clave de Redis",
             "categoria": "derivado",
             "alcance": CLASE_CLIENTE,
@@ -610,10 +744,10 @@ def _datos_derivados() -> list[dict[str, str]]:
                 "agencia, el cliente, el canal y el identificador externo del mensaje; "
                 "no guarda ningún contenido del mensaje."
             ),
-            "procedencia": "apps/api/app/channels/idempotency.py:PREFIJO",
+            "procedencia": "apps/api/app/channels/idempotency.py:clave_de",
         },
         {
-            "nombre": f"{auth.PREFIJO_POR_DEFECTO}:sesion:*",
+            "nombre": patrones["sesion"],
             "forma": "clave de Redis",
             "categoria": "plataforma",
             "alcance": CLASE_AGENCIA,
@@ -621,10 +755,10 @@ def _datos_derivados() -> list[dict[str, str]]:
                 "Sesión abierta de una persona operadora: agencia, cliente y rol, más "
                 "la huella del secreto de la sesión. El secreto no se guarda."
             ),
-            "procedencia": "apps/api/app/tenancy/auth.py:PREFIJO_POR_DEFECTO",
+            "procedencia": "apps/api/app/tenancy/auth.py:AlmacenDeSesiones.clave",
         },
         {
-            "nombre": f"{limits.PREFIJO_POR_DEFECTO}:limite:*",
+            "nombre": patrones["limite"],
             "forma": "clave de Redis",
             "categoria": "derivado",
             "alcance": CLASE_CLIENTE,
@@ -633,7 +767,7 @@ def _datos_derivados() -> list[dict[str, str]]:
                 "límite y una huella irreversible del par (inquilino, dirección de red "
                 "del remitente): la dirección no se guarda."
             ),
-            "procedencia": "apps/api/app/tenancy/limits.py:PREFIJO_POR_DEFECTO",
+            "procedencia": "apps/api/app/tenancy/limits.py:Limitador.clave",
         },
     ]
 
@@ -836,7 +970,20 @@ async def _pedir_por_asgi(aplicacion, metodo: str, camino: str) -> tuple[int, li
         "client": ("127.0.0.1", 0),
         "server": ("heraldo.invalid", 80),
     }
-    await aplicacion(ambito, recibir, enviar)
+    # WHY: si la aplicacion LANZA en vez de responder, esta medida no sabe que
+    # emite esa ruta — y el documento no puede decir «ninguna emite cookies»
+    # habiendola contado. Se falla CERRADO nombrando la ruta: una superficie que
+    # no se pudo medir es una superficie sin inventariar, no una superficie
+    # limpia. (Antes la excepcion se llevaba por delante toda la derivacion con
+    # una traza cruda, que ademas enterraba de que ruta se trataba.)
+    try:
+        await aplicacion(ambito, recibir, enviar)
+    except Exception as fallo:  # noqa: BLE001 - se re-lanza con su contexto
+        raise SuperficieNoMedible(
+            f"{metodo} {camino} no respondio: lanzo {type(fallo).__name__}: {fallo}. "
+            "Una ruta que no se puede medir no se puede inventariar como si no "
+            "emitiera nada"
+        ) from fallo
     return int(estado["codigo"]), list(estado["cookies"])
 
 

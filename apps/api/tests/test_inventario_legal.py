@@ -763,3 +763,124 @@ def test_el_barrido_de_prefijos_ve_una_constante_dentro_de_una_clase(guion, tmp_
     assert guion.constantes_de_prefijo(tmp_path) == [
         "apps/api/app/tenancy/dentro.py:PREFIJO_DE_CLASE"
     ]
+
+
+# ==========================================================================
+# El barrido de salidas resuelve el ALIAS, y no cuenta comentarios
+# ==========================================================================
+def _arbol_con_salida(tmp_path, cuerpo: str):
+    arbol = tmp_path / "arbol"
+    modulo = arbol / "apps" / "api" / "app" / "agents" / "otro.py"
+    modulo.parent.mkdir(parents=True, exist_ok=True)
+    (arbol / "packages" / "egress").mkdir(parents=True, exist_ok=True)
+    (arbol / "packages" / "egress" / "red.py").write_text(
+        "async def pedir(url):\n    return url\n", encoding="utf-8"
+    )
+    modulo.write_text(cuerpo, encoding="utf-8")
+    return arbol
+
+
+def test_una_salida_con_alias_no_se_escapa_del_inventario(guion, tmp_path) -> None:
+    """`import pedir as salir` es una salida igual de real.
+
+    # WHY: con el barrido por texto, un alias daba falso NEGATIVO —una salida que
+    # el inventario no nombra— y `test_egreso_red` no lo tapa: ese guard mira
+    # quién IMPORTA un cliente de red, y un alias de `pedir` no importa ninguno.
+    """
+    arbol = _arbol_con_salida(
+        tmp_path,
+        "from egress.red import pedir as salir\n\n\nasync def fuera():\n"
+        "    return await salir('x')\n",
+    )
+    assert guion.llamantes_del_punto_de_salida(arbol) == ["apps/api/app/agents/otro.py"]
+
+
+def test_una_salida_por_el_modulo_tampoco_se_escapa(guion, tmp_path) -> None:
+    """`egress.red.pedir(...)` y `red.pedir(...)` también son llamadas."""
+    for cuerpo in (
+        "import egress.red\n\n\nasync def fuera():\n    return await egress.red.pedir('x')\n",
+        "from egress import red\n\n\nasync def fuera():\n    return await red.pedir('x')\n",
+    ):
+        arbol = _arbol_con_salida(tmp_path, cuerpo)
+        assert guion.llamantes_del_punto_de_salida(arbol) == [
+            "apps/api/app/agents/otro.py"
+        ], cuerpo
+
+
+def test_la_palabra_pedir_en_un_comentario_no_es_una_salida(guion, tmp_path) -> None:
+    """El control en la otra dirección: nombrarlo no es llamarlo."""
+    arbol = _arbol_con_salida(
+        tmp_path,
+        "# aqui se explica que la unica salida es egress.red.pedir(...)\n"
+        '"""Y el docstring tambien lo menciona: pedir(url)."""\n\n\n'
+        "def nada():\n    return 1\n",
+    )
+    assert guion.llamantes_del_punto_de_salida(arbol) == []
+
+
+# ==========================================================================
+# El espacio de nombres de las claves, mirado por su VALOR
+# ==========================================================================
+def test_ningun_literal_del_espacio_de_nombres_vive_fuera_de_su_constante(guion) -> None:
+    """Un literal `heraldo:` suelto sería una familia de claves sin constante.
+
+    # WHY: el barrido de prefijos reconoce las constantes por su NOMBRE, y ese
+    # límite está publicado. Esto lo cierra por el otro lado —por el VALOR—: si
+    # alguien escribe el espacio de nombres a mano en vez de declararlo, aquí se
+    # ve. Las dos heurísticas juntas dejan fuera mucho menos que cualquiera sola.
+    """
+    import ast
+
+    declarados: list[str] = []
+    sueltos: list[str] = []
+    for carpeta in guion.ARBOL_DE_PRODUCCION:
+        base = RAIZ / carpeta
+        if not base.is_dir():
+            continue
+        for archivo in sorted(base.rglob("*.py")):
+            if "__pycache__" in archivo.parts:
+                continue
+            relativa = archivo.relative_to(RAIZ).as_posix()
+            arbol = ast.parse(archivo.read_text(encoding="utf-8"), filename=relativa)
+
+            docstrings, de_constante = set(), set()
+            for nodo in ast.walk(arbol):
+                cuerpo = getattr(nodo, "body", None)
+                if (
+                    isinstance(cuerpo, list)
+                    and cuerpo
+                    and isinstance(cuerpo[0], ast.Expr)
+                    and isinstance(cuerpo[0].value, ast.Constant)
+                    and isinstance(cuerpo[0].value.value, str)
+                ):
+                    docstrings.add(id(cuerpo[0].value))
+                destinos = (
+                    nodo.targets
+                    if isinstance(nodo, ast.Assign)
+                    else [nodo.target]
+                    if isinstance(nodo, ast.AnnAssign)
+                    else []
+                )
+                for destino in destinos:
+                    if isinstance(destino, ast.Name) and destino.id.startswith("PREFIJO"):
+                        de_constante.add(id(nodo.value))
+
+            for nodo in ast.walk(arbol):
+                if not (isinstance(nodo, ast.Constant) and isinstance(nodo.value, str)):
+                    continue
+                if "heraldo:" not in nodo.value:
+                    continue
+                donde = f"{relativa}:{nodo.lineno}"
+                if id(nodo) in de_constante:
+                    declarados.append(donde)
+                elif id(nodo) not in docstrings:
+                    sueltos.append(donde)
+
+    assert declarados, (
+        "control: el barrido no encontro NINGUN espacio de nombres declarado, asi que "
+        "un literal suelto tampoco lo habria encontrado"
+    )
+    assert not sueltos, (
+        f"hay literales del espacio de nombres fuera de una constante PREFIJO*: {sueltos}. "
+        "Una familia de claves declarada a mano no entra en el inventario"
+    )
