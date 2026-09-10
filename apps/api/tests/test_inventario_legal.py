@@ -535,3 +535,139 @@ def test_el_json_es_legible_y_lleva_procedencia_en_cada_fila(guion, conexion_adm
         assert filas, f"el bloque {nombre} salio vacio en el JSON"
         for fila in filas:
             assert fila.get("procedencia"), f"una fila de {nombre} no dice de donde salio"
+
+
+# ==========================================================================
+# La ficha de un proveedor: la region NO se publica sin su evidencia
+# ==========================================================================
+def _proveedor_de_sonda(guion, ficha):
+    from app.agents.providers import Proveedor
+
+    return {
+        "proveedor-de-sonda": Proveedor(
+            nombre="proveedor-de-sonda",
+            url_de_validacion="https://ejemplo.invalid/v1/models",
+            cabeceras=lambda credencial: {},
+            condiciones=ficha,
+        )
+    }
+
+
+def _fila_del_proveedor(filas):
+    return next(fila for fila in filas if "proveedor-de-sonda" in fila["destinatario"])
+
+
+def test_la_region_de_un_proveedor_se_publica_con_quien_la_verifico_y_cuando(guion) -> None:
+    """Una región publicada a secas es una afirmación sin respaldo: eso es P-51.
+
+    # WHY: `FichaDeCondiciones` trae `ubicacion`, `verificada_en` y `fuente`. La
+    # primera versión de este inventario leía solo la primera, así que el día que
+    # T-100·bis rellene las fichas el documento diría «se trata en tal región» sin
+    # decir quién lo comprobó ni cuándo — que es exactamente la clase de frase que
+    # la revisión legal externa contó ocho veces. Hoy ningún proveedor tiene ficha,
+    # así que esto se mide con una inyectada: la rama existe antes que su dato.
+    """
+    from datetime import date
+
+    from app.agents.providers import FichaDeCondiciones
+
+    ficha = FichaDeCondiciones(
+        no_entrenamiento_por_defecto=True,
+        retencion="30 dias",
+        acceso_humano="solo por abuso",
+        ubicacion="region de sonda",
+        verificada_en=date(2026, 9, 9),
+        fuente="condiciones publicadas del proveedor",
+    )
+    fila = _fila_del_proveedor(
+        guion.derivar_destinatarios(lista_de_proveedores=_proveedor_de_sonda(guion, ficha))
+    )
+    assert fila["ubicacion"] == "region de sonda", (
+        "la region publicada no es la de la ficha: " + fila["ubicacion"]
+    )
+    assert "2026-09-09" in fila["procedencia"], (
+        "la region se publico sin la FECHA en que se verifico: " + fila["procedencia"]
+    )
+    assert "condiciones publicadas del proveedor" in fila["procedencia"], (
+        "la region se publico sin la FUENTE que la respalda: " + fila["procedencia"]
+    )
+
+
+def test_control_un_proveedor_sin_ficha_no_afirma_ninguna_region(guion) -> None:
+    """El control en la otra dirección: sin ficha no se inventa ni región ni evidencia."""
+    fila = _fila_del_proveedor(
+        guion.derivar_destinatarios(lista_de_proveedores=_proveedor_de_sonda(guion, None))
+    )
+    assert "pendiente (T-100·bis)" in fila["ubicacion"]
+    assert "2026" not in fila["procedencia"], (
+        "sin ficha no puede haber fecha de verificacion: " + fila["procedencia"]
+    )
+
+
+# ==========================================================================
+# El universo de los DERIVADOS se deriva: ningun prefijo se queda fuera
+# ==========================================================================
+def test_toda_constante_de_prefijo_de_produccion_esta_inventariada(guion) -> None:
+    """El control sobre el árbol REAL: hoy no hay ninguna familia de claves sin fila.
+
+    # WHY (P-52, otra vez): el bloque de datos enumeraba a mano las tres familias
+    # de claves de Redis que la casilla nombra, y con eso afirmaba cubrir «los
+    # derivados» habiendo mirado solo donde ya sabía que mirar. Al derivar el
+    # universo apareció una CUARTA constante de prefijo en producción que ninguna
+    # fila mencionaba. No fallaba: medía menos, y salía verde.
+    """
+    guion.exigir_que_todo_prefijo_este_inventariado(RAIZ)
+
+
+def test_un_prefijo_de_produccion_sin_fila_pone_el_inventario_en_rojo(
+    guion, monkeypatch
+) -> None:
+    """El sabotaje sobre el universo real: se quita una declaración y tiene que caerse."""
+    declaradas = dict(guion.PREFIJOS_INVENTARIADOS)
+    quitada = sorted(declaradas)[0]
+    del declaradas[quitada]
+    monkeypatch.setattr(guion, "PREFIJOS_INVENTARIADOS", declaradas)
+    with pytest.raises(guion.PrefijoSinInventariar, match=quitada.split(":")[-1]):
+        guion.exigir_que_todo_prefijo_este_inventariado(RAIZ)
+
+
+def test_el_barrido_de_prefijos_ve_una_constante_nueva(guion, tmp_path) -> None:
+    """El sabotaje del propio barrido: si no ve nada, todo lo de arriba pasa por ausencia."""
+    modulo = tmp_path / "apps" / "api" / "app" / "channels" / "otro.py"
+    modulo.parent.mkdir(parents=True)
+    modulo.write_text('PREFIJO_NUEVO = "heraldo:otro"\n', encoding="utf-8")
+    assert guion.constantes_de_prefijo(tmp_path) == [
+        "apps/api/app/channels/otro.py:PREFIJO_NUEVO"
+    ]
+
+    modulo.write_text('OTRA_COSA = "heraldo:otro"\n', encoding="utf-8")
+    assert guion.constantes_de_prefijo(tmp_path) == [], (
+        "el barrido encuentra prefijos donde no los hay"
+    )
+
+
+def test_una_declaracion_de_prefijo_muerta_se_cae(guion, monkeypatch) -> None:
+    """Una declaración que apunta a una constante que ya no existe tapa a la siguiente."""
+    declaradas = {
+        **guion.PREFIJOS_INVENTARIADOS,
+        "apps/api/app/ya_no_existe.py:PREFIJO": "una familia que se fue",
+    }
+    monkeypatch.setattr(guion, "PREFIJOS_INVENTARIADOS", declaradas)
+    with pytest.raises(guion.DeclaracionDePrefijoMuerta, match="ya_no_existe"):
+        guion.exigir_que_todo_prefijo_este_inventariado(RAIZ)
+
+
+def test_el_generador_se_niega_si_hay_un_prefijo_sin_inventariar(
+    guion, conexion_admin, monkeypatch
+) -> None:
+    """El guard tiene que estar CABLEADO a `derivar`, no solo existir.
+
+    # WHY (`feedback_mecanismo_cableado_a_uno`): una comprobación que solo llama
+    # su propia prueba no protege el documento. Si alguien quita la llamada de
+    # `derivar`, esto se cae.
+    """
+    declaradas = dict(guion.PREFIJOS_INVENTARIADOS)
+    del declaradas[sorted(declaradas)[0]]
+    monkeypatch.setattr(guion, "PREFIJOS_INVENTARIADOS", declaradas)
+    with pytest.raises(guion.PrefijoSinInventariar):
+        guion.derivar(conexion_admin)

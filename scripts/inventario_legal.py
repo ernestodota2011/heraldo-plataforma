@@ -44,6 +44,7 @@ migrado: el bloque de datos se deriva del CATALOGO VIVO, igual que
 from __future__ import annotations
 
 import argparse
+import ast
 import asyncio
 import importlib.util
 import json
@@ -116,6 +117,14 @@ class ArtefactoQueYaExiste(InventarioIncompleto):
 
 class SalidaNoDeclarada(InventarioIncompleto):
     """Aparecio un modulo de salida nuevo: el inventario no nombra ese destinatario."""
+
+
+class PrefijoSinInventariar(InventarioIncompleto):
+    """Produccion declara una familia de claves que ninguna fila del inventario nombra."""
+
+
+class DeclaracionDePrefijoMuerta(InventarioIncompleto):
+    """Se declara inventariado un prefijo que ya no existe: tapa al siguiente que falte."""
 
 
 class EntornoNoCorrespondeAlBloqueo(InventarioIncompleto):
@@ -340,6 +349,97 @@ def llamantes_del_punto_de_salida(raiz: Path = RAIZ) -> list[str]:
     return encontrados
 
 
+#: Por que nombre se reconoce, en este arbol, una constante que declara el
+#: PREFIJO de una familia de claves. Las cuatro que hay hoy lo usan.
+_NOMBRE_DE_PREFIJO = "PREFIJO"
+
+#: Cada constante de prefijo de PRODUCCION, con la fila del inventario que la
+#: cubre. Es el cruce que impide que una familia de claves entre en silencio.
+#:
+#: # WHY (P-52, tercera vez): la primera version enumeraba a mano las TRES
+#: familias de Redis que la casilla nombra, y con eso el bloque de datos afirmaba
+#: cubrir «los derivados» habiendo mirado solo donde ya sabia que mirar. Al
+#: derivar el universo de verdad aparecio una CUARTA constante de prefijo en
+#: produccion que ninguna fila mencionaba. No fallaba: media menos, y salia
+#: verde. El universo de una medida se DERIVA, no se supone.
+PREFIJOS_INVENTARIADOS: dict[str, str] = {
+    "apps/api/app/channels/idempotency.py:PREFIJO": (
+        "la marca de idempotencia en Redis, que el bloque de datos inventaria como "
+        "clave propia"
+    ),
+    "apps/api/app/tenancy/auth.py:PREFIJO_POR_DEFECTO": (
+        "la sesion de una persona operadora en Redis, que el bloque de datos "
+        "inventaria como clave propia"
+    ),
+    "apps/api/app/tenancy/limits.py:PREFIJO_POR_DEFECTO": (
+        "el contador de limite en Redis, que el bloque de datos inventaria como "
+        "clave propia"
+    ),
+    "apps/api/app/agents/providers.py:PREFIJO_DEL_SECRETO": (
+        "no es un almacen aparte: nombra las FILAS de la tabla `secretos`, que el "
+        "bloque de datos ya inventaria como credencial cifrada. Se declara aqui para "
+        "que conste que se miro y se decidio, no que se paso por alto"
+    ),
+}
+
+
+def constantes_de_prefijo(raiz: Path = RAIZ) -> list[str]:
+    """`archivo:SIMBOLO` de cada constante de prefijo del arbol de PRODUCCION.
+
+    Se lee con el analizador de sintaxis y no con una expresion regular: lo que
+    interesa es una asignacion de MODULO, no la palabra suelta dentro de un
+    comentario o de una cadena.
+    """
+    encontradas: list[str] = []
+    for carpeta in ARBOL_DE_PRODUCCION:
+        base = raiz / carpeta
+        if not base.is_dir():
+            continue
+        for archivo in sorted(base.rglob("*.py")):
+            if "__pycache__" in archivo.parts:
+                continue
+            relativa = archivo.relative_to(raiz).as_posix()
+            arbol = ast.parse(archivo.read_text(encoding="utf-8"), filename=relativa)
+            for nodo in arbol.body:  # solo nivel de MODULO: una constante no vive dentro
+                destinos: list[ast.expr] = []
+                if isinstance(nodo, ast.Assign):
+                    destinos = list(nodo.targets)
+                elif isinstance(nodo, ast.AnnAssign):
+                    destinos = [nodo.target]
+                for destino in destinos:
+                    if isinstance(destino, ast.Name) and destino.id.startswith(
+                        _NOMBRE_DE_PREFIJO
+                    ):
+                        encontradas.append(f"{relativa}:{destino.id}")
+    return sorted(encontradas)
+
+
+def exigir_que_todo_prefijo_este_inventariado(raiz: Path = RAIZ) -> None:
+    """Ninguna familia de claves de produccion se queda fuera del inventario.
+
+    Falla en las DOS direcciones: un prefijo sin fila, y una declaracion que
+    apunta a una constante que ya no existe — porque una declaracion caducada
+    tapa a la siguiente que falte.
+    """
+    encontradas = set(constantes_de_prefijo(raiz))
+    declaradas = set(PREFIJOS_INVENTARIADOS)
+
+    sin_fila = sorted(encontradas - declaradas)
+    if sin_fila:
+        raise PrefijoSinInventariar(
+            "produccion declara familias de claves que ninguna fila del inventario "
+            f"nombra: {sin_fila}. Un documento publico que dice que datos existen no "
+            "puede saltarse una: declara en PREFIJOS_INVENTARIADOS que fila la cubre, "
+            "y si no la cubre ninguna, anadela al bloque de datos"
+        )
+
+    muertas = sorted(declaradas - encontradas)
+    if muertas:
+        raise DeclaracionDePrefijoMuerta(
+            f"PREFIJOS_INVENTARIADOS declara prefijos que ya no existen: {muertas}. Una "
+            "declaracion caducada tapa a la siguiente que falte: quitala"
+        )
+
 # ==========================================================================
 # Bloque 1 — DATOS: el catalogo vivo, y los derivados que no son tabla
 # ==========================================================================
@@ -555,6 +655,27 @@ def derivar_destinatarios(raiz: Path = RAIZ, lista_de_proveedores=None) -> list[
     for nombre in sorted(lista_de_proveedores):
         proveedor = lista_de_proveedores[nombre]
         ficha = proveedor.condiciones
+        # WHY (P-51 otra vez, en su forma exacta): una región publicada a secas es
+        # una afirmación sin respaldo. `FichaDeCondiciones` trae, junto a la
+        # ubicación, QUIÉN la verificó (`fuente`) y CUÁNDO (`verificada_en`): las
+        # tres viajan juntas o la fila diría «se trata en tal región» sin nada
+        # detrás. Hoy ningún proveedor tiene ficha, así que esta rama nace antes
+        # que su dato — y por eso se mide con una ficha inyectada.
+        if ficha is not None:
+            ubicacion = ficha.ubicacion
+            procedencia = (
+                "apps/api/app/agents/providers.py:LISTA_DECLARADA — ficha verificada el "
+                f"{ficha.verificada_en.isoformat()} en {ficha.fuente}"
+            )
+        else:
+            ubicacion = (
+                "pendiente (T-100·bis): su ficha de condiciones no está verificada ni "
+                "fechada, y sin ficha no se registra ninguna credencial"
+            )
+            procedencia = (
+                "apps/api/app/agents/providers.py:LISTA_DECLARADA (sin ficha verificada: "
+                "no se afirma ninguna región)"
+            )
         filas.append(
             {
                 "destinatario": f"proveedor de modelo: {nombre}",
@@ -563,14 +684,9 @@ def derivar_destinatarios(raiz: Path = RAIZ, lista_de_proveedores=None) -> list[
                     "antes de guardarla (RF-18). Es una consulta a su catálogo de "
                     "modelos: no envía ningún contenido del inquilino"
                 ),
-                "ubicacion": (
-                    ficha.ubicacion
-                    if ficha is not None
-                    else "pendiente (T-100·bis): su ficha de condiciones no está "
-                    "verificada ni fechada, y sin ficha no se registra ninguna credencial"
-                ),
+                "ubicacion": ubicacion,
                 "mecanismo": MECANISMO_DE_SALIDA,
-                "procedencia": "apps/api/app/agents/providers.py:LISTA_DECLARADA",
+                "procedencia": procedencia,
             }
         )
 
@@ -1195,6 +1311,11 @@ LIMITES_DEL_INVENTARIO: tuple[str, ...] = (
     "eso lo decide T-030·ter con estos hechos delante.",
     "La licencia de un paquete que solo se instala en un sistema operativo se declara "
     "en el guion y se cruza contra los metadatos en el entorno que sí lo instala.",
+    "Los datos que no son tabla se descubren por las constantes de prefijo del código, "
+    "y el generador se niega a escribir si alguna no tiene fila. Ese descubrimiento "
+    "reconoce las constantes por su nombre: una familia de claves que no lo siguiera "
+    "quedaría fuera, y por eso el nombre es convención del repositorio y no criterio "
+    "de quien la escribe.",
 )
 
 
@@ -1207,6 +1328,7 @@ def derivar(
 ) -> Inventario:
     """Todo el inventario, derivado. Si algo no se puede derivar, se cae aqui."""
     exigir_que_sigan_pendientes(raiz)
+    exigir_que_todo_prefijo_este_inventariado(raiz)
     exigir_catalogo_de_esta_revision(conexion, raiz)
     superficies, rutas = derivar_superficies(raiz, fabrica_de_aplicacion)
     return Inventario(

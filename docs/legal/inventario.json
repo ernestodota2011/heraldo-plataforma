@@ -103,14 +103,14 @@
         "destinatario": "proveedor de modelo: anthropic",
         "funcion": "validar contra el proveedor la credencial que registra el cliente, antes de guardarla (RF-18). Es una consulta a su catálogo de modelos: no envía ningún contenido del inquilino",
         "mecanismo": "petición HTTPS saliente por el punto único de salida (`egress.red.pedir`): solo `https` al 443, con el destino revalidado contra direcciones internas antes de conectar y en cada redirección",
-        "procedencia": "apps/api/app/agents/providers.py:LISTA_DECLARADA",
+        "procedencia": "apps/api/app/agents/providers.py:LISTA_DECLARADA (sin ficha verificada: no se afirma ninguna región)",
         "ubicacion": "pendiente (T-100·bis): su ficha de condiciones no está verificada ni fechada, y sin ficha no se registra ninguna credencial"
       },
       {
         "destinatario": "proveedor de modelo: openai",
         "funcion": "validar contra el proveedor la credencial que registra el cliente, antes de guardarla (RF-18). Es una consulta a su catálogo de modelos: no envía ningún contenido del inquilino",
         "mecanismo": "petición HTTPS saliente por el punto único de salida (`egress.red.pedir`): solo `https` al 443, con el destino revalidado contra direcciones internas antes de conectar y en cada redirección",
-        "procedencia": "apps/api/app/agents/providers.py:LISTA_DECLARADA",
+        "procedencia": "apps/api/app/agents/providers.py:LISTA_DECLARADA (sin ficha verificada: no se afirma ninguna región)",
         "ubicacion": "pendiente (T-100·bis): su ficha de condiciones no está verificada ni fechada, y sin ficha no se registra ninguna credencial"
       },
       {
@@ -610,7 +610,8 @@
     "El borde de la agencia que publica las superficies no vive en este repositorio: no se deriva y se declara como límite.",
     "El almacenamiento del navegador (cookies propias, `localStorage`) solo se puede medir cuando exista una superficie de navegador; hoy no hay ninguna.",
     "Este inventario no dice quién es responsable, encargado ni subencargado de nada: eso lo decide T-030·ter con estos hechos delante.",
-    "La licencia de un paquete que solo se instala en un sistema operativo se declara en el guion y se cruza contra los metadatos en el entorno que sí lo instala."
+    "La licencia de un paquete que solo se instala en un sistema operativo se declara en el guion y se cruza contra los metadatos en el entorno que sí lo instala.",
+    "Los datos que no son tabla se descubren por las constantes de prefijo del código, y el generador se niega a escribir si alguna no tiene fila. Ese descubrimiento reconoce las constantes por su nombre: una familia de claves que no lo siguiera quedaría fuera, y por eso el nombre es convención del repositorio y no criterio de quien la escribe."
   ],
   "medicion_de_rutas": [
     {
