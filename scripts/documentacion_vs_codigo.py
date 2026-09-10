@@ -275,8 +275,34 @@ def nodeids_reales() -> frozenset[str]:
 #: Crisol, T-112: `Path.glob("**/*.md")` SI desciende a esos directorios antes
 #: de que nada los descarte).
 _DIRECTORIOS_EXENTOS_DE_COBERTURA = frozenset(
-    {".venv", ".git", "node_modules", ".pytest_cache", "dist", "build", "__pycache__"}
+    {
+        ".venv",
+        ".git",
+        "node_modules",
+        ".pytest_cache",
+        "dist",
+        "build",
+        "__pycache__",
+        ".ruff_cache",
+        ".mypy_cache",
+        ".tox",
+        "htmlcov",
+        ".next",
+        "out",
+    }
 )
+
+# WHY (lista estatica, no derivada de `.gitignore` — Crisol lo sugirio):
+# `.gitignore` ya cubre estos mismos nombres, pero es un lenguaje de patrones
+# completo (comodines, negaciones como `!.env.example`, ambito por
+# subdirectorio) — parsearlo bien es un analizador aparte, y uno mal escrito
+# INTRODUCIRIA el mismo tipo de bug que esta lista existe para evitar
+# (`feedback_no_propagar_sin_verificar`: la complejidad de una idea no la hace
+# gratis). Esta lista es deliberadamente una optimizacion de RENDIMIENTO, no de
+# CORRECCION: si un directorio nuevo faltara aqui, el peor caso es un gate mas
+# lento, nunca uno que deje pasar una cita falsa (`verificar_cobertura()` sigue
+# revisando ese `.md`, solo que mas despacio). Anadir un directorio a esta
+# lista es tan barato como anadirlo aqui.
 
 
 def _markdown_bajo(raiz: Path) -> list[Path]:

@@ -408,6 +408,36 @@ def test_un_bloque_con_lenguaje_declarado_tambien_oculta_su_cita() -> None:
     )
 
 
+def test_un_delimitador_puede_abrir_con_backticks_y_cerrar_con_virgulillas() -> None:
+    """A PROPOSITO no se exige que las dos marcas coincidan (Crisol, T-112).
+
+    # WHY: la alternancia es deliberada — el propio comentario de
+    # `_CERCA_DE_BLOQUE` ya lo declaraba ("no exige que las dos marcas usen el
+    # MISMO delimitador"), pero nada lo fijaba con una prueba. Nadie escribe
+    # Markdown asi a proposito, y no vale la pena que este guion se comporte
+    # distinto solo porque alguien tecleo mal el cierre: sigue siendo, a todos
+    # los efectos practicos, "un bloque que se cerro".
+    """
+    gate = _gate()
+    texto = "```\n<!-- respalda: a.py::no_existe -->\n~~~\n"
+    assert gate.citas_de(texto, "x.md") == []
+
+
+def test_un_ancla_de_solo_espacios_o_tabs_tambien_es_la_carga_vacia() -> None:
+    """`<!-- respalda:   -->` y `<!-- respalda: \\t -->` recortan a "" igual
+
+    que `<!-- respalda: -->` a secas — la misma rama "VACIA", no una cita con
+    contenido invisible.
+    """
+    gate = _gate()
+    for espacios in ("   ", "\t", " \t "):
+        texto = f"afirmacion.\n<!-- respalda:{espacios}-->\n"
+        faltas = gate.verificar_documento(texto, "x.md", frozenset({"a.py::t1"}))
+        assert faltas and "VACIA" in faltas[0], (
+            f"la carga {espacios!r} (solo espacios/tabs) no cayo en la rama VACIA"
+        )
+
+
 def test_dos_bloques_de_codigo_dejan_la_cita_de_en_medio_visible() -> None:
     """Abrir y cerrar dos veces no deja el estado "dentro" pegado."""
     gate = _gate()
