@@ -36,9 +36,9 @@ por cliente), **de agencia** o **no-inquilino**.
 | secretos | tabla del catálogo | credencial cifrada | de cliente | Credenciales del inquilino guardadas cifradas (columna binaria); no existe ninguna columna con el valor en claro y no se devuelven en claro por ninguna vía (RF-09). | apps/api/migrations/versions/0003_la_base_y_la_cola.py:62 |
 | trabajos | tabla del catálogo | cola | de cliente | Trabajos pendientes o en curso del inquilino, con su estado, su número de intentos y el momento en que vuelven a estar disponibles. Su carga útil es la del trabajo encolado. | apps/api/migrations/versions/0003_la_base_y_la_cola.py:114 |
 | trabajos_archivados | tabla del catálogo | cola | de cliente | Copia de los trabajos ya terminados, para consulta y purga por antigüedad. Se inserta, se consulta y se purga: no se puede reescribir. | apps/api/migrations/versions/0003_la_base_y_la_cola.py:152 |
-| heraldo:idem:* | clave de Redis | derivado | de cliente | Marca de que un mensaje entrante ya se recibió. La clave lleva la agencia, el cliente, el canal y el identificador externo del mensaje; no guarda ningún contenido del mensaje. | apps/api/app/channels/idempotency.py:PREFIJO |
-| heraldo:sesion:* | clave de Redis | plataforma | de agencia | Sesión abierta de una persona operadora: agencia, cliente y rol, más la huella del secreto de la sesión. El secreto no se guarda. | apps/api/app/tenancy/auth.py:PREFIJO_POR_DEFECTO |
-| heraldo:limite:* | clave de Redis | derivado | de cliente | Contador de un límite por ventana. La clave lleva el nombre del límite y una huella irreversible del par (inquilino, dirección de red del remitente): la dirección no se guarda. | apps/api/app/tenancy/limits.py:PREFIJO_POR_DEFECTO |
+| heraldo:idem:* | clave de Redis | derivado | de cliente | Marca de que un mensaje entrante ya se recibió. La clave lleva la agencia, el cliente, el canal y el identificador externo del mensaje; no guarda ningún contenido del mensaje. | apps/api/app/channels/idempotency.py:clave_de |
+| heraldo:sesion:* | clave de Redis | plataforma | de agencia | Sesión abierta de una persona operadora: agencia, cliente y rol, más la huella del secreto de la sesión. El secreto no se guarda. | apps/api/app/tenancy/auth.py:AlmacenDeSesiones.clave |
+| heraldo:limite:* | clave de Redis | derivado | de cliente | Contador de un límite por ventana. La clave lleva el nombre del límite y una huella irreversible del par (inquilino, dirección de red del remitente): la dirección no se guarda. | apps/api/app/tenancy/limits.py:LimitadorCompartido.clave |
 
 ## 2. Destinatarios
 
@@ -98,7 +98,7 @@ declaran sus metadatos instalados.
 | certifi | 2026.7.22 | MPL-2.0 | metadatos instalados (License) | uv.lock:[[package]] + importlib.metadata |
 | cffi | 2.1.1 | MIT-0 | metadatos instalados (License-Expression) | uv.lock:[[package]] + importlib.metadata |
 | click | 8.5.0 | BSD-3-Clause | metadatos instalados (License-Expression) | uv.lock:[[package]] + importlib.metadata |
-| colorama | 0.4.6 | BSD License | metadatos instalados (Classifier) | uv.lock:[[package]] + importlib.metadata |
+| colorama | 0.4.6 | BSD License | declarada (Classifier): solo se instala en Windows (`sys_platform == 'win32'` en uv.lock) | scripts/inventario_legal.py:LICENCIAS_DE_PAQUETES_CONDICIONADOS |
 | cryptography | 50.0.1 | Apache-2.0 OR BSD-3-Clause | metadatos instalados (License-Expression) | uv.lock:[[package]] + importlib.metadata |
 | fastapi | 0.141.1 | MIT | metadatos instalados (License-Expression) | uv.lock:[[package]] + importlib.metadata |
 | greenlet | 3.5.5 | MIT AND PSF-2.0 | metadatos instalados (License-Expression) | uv.lock:[[package]] + importlib.metadata |
@@ -132,7 +132,7 @@ declaran sus metadatos instalados.
 | starlette | 1.6.0 | BSD-3-Clause | metadatos instalados (License-Expression) | uv.lock:[[package]] + importlib.metadata |
 | typing-extensions | 4.16.0 | PSF-2.0 | metadatos instalados (License-Expression) | uv.lock:[[package]] + importlib.metadata |
 | typing-inspection | 0.4.4 | MIT | metadatos instalados (License-Expression) | uv.lock:[[package]] + importlib.metadata |
-| tzdata | 2026.3 | Apache-2.0 | metadatos instalados (License) | uv.lock:[[package]] + importlib.metadata |
+| tzdata | 2026.3 | Apache-2.0 | declarada (License): solo se instala en Windows (`sys_platform == 'win32'` en uv.lock) | scripts/inventario_legal.py:LICENCIAS_DE_PAQUETES_CONDICIONADOS |
 | uvicorn | 0.52.4 | BSD-3-Clause | metadatos instalados (License-Expression) | uv.lock:[[package]] + importlib.metadata |
 | uvloop | 0.22.1 | MIT License | declarada (License): no se instala en Windows (`sys_platform != 'win32'` en uv.lock) | scripts/inventario_legal.py:LICENCIAS_DE_PAQUETES_CONDICIONADOS |
 | watchfiles | 1.2.0 | MIT | metadatos instalados (License) | uv.lock:[[package]] + importlib.metadata |
