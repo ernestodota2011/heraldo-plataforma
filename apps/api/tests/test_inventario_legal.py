@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -807,6 +808,35 @@ def test_una_salida_por_el_modulo_tampoco_se_escapa(guion, tmp_path) -> None:
         ], cuerpo
 
 
+def test_una_salida_por_import_relativo_tampoco_se_escapa(guion, tmp_path) -> None:
+    """`from ..egress.red import pedir` desde otro paquete es una salida igual."""
+    arbol = tmp_path / "arbol"
+    modulo = arbol / "packages" / "otro" / "salida.py"
+    modulo.parent.mkdir(parents=True)
+    (arbol / "packages" / "egress").mkdir(parents=True)
+    (arbol / "packages" / "egress" / "red.py").write_text(
+        "async def pedir(url):
+    return url
+", encoding="utf-8"
+    )
+    modulo.write_text(
+        "from ..egress.red import pedir
+
+
+async def fuera():
+"
+        "    return await pedir('x')
+",
+        encoding="utf-8",
+    )
+    assert guion.llamantes_del_punto_de_salida(arbol) == ["packages/otro/salida.py"]
+
+    modulo.write_text("def nada():
+    return 1
+", encoding="utf-8")
+    assert guion.llamantes_del_punto_de_salida(arbol) == []
+
+
 def test_la_palabra_pedir_en_un_comentario_no_es_una_salida(guion, tmp_path) -> None:
     """El control en la otra dirección: nombrarlo no es llamarlo."""
     arbol = _arbol_con_salida(
@@ -908,7 +938,7 @@ def test_un_modulo_de_salida_anidado_tampoco_se_escapa(guion, tmp_path) -> None:
 # ==========================================================================
 # La procedencia es una CITA: tiene que resolver contra el árbol
 # ==========================================================================
-_CITA = __import__("re").compile(r"^([\w./-]+\.py):([A-Za-z_][\w.]*|\d+)$")
+_CITA = re.compile(r"^([\w./-]+\.py):([A-Za-z_][\w.]*|\d+)$")
 
 
 def _simbolos_de(arbol) -> set[str]:
@@ -964,7 +994,7 @@ def test_cada_procedencia_que_cita_el_codigo_resuelve_de_verdad(guion, conexion_
         procedencia = str(fila.get("procedencia", ""))
         # una procedencia puede llevar la cita y además una nota; se parte por
         # los separadores que usa el generador y se mira cada trozo.
-        for trozo in __import__("re").split(r"\s+—\s+|\s+\(", procedencia):
+        for trozo in re.split(r"\s+—\s+|\s+\(", procedencia):
             casa = _CITA.match(trozo.strip().rstrip(")"))
             if casa is None:
                 continue

@@ -393,7 +393,17 @@ def llamantes_del_punto_de_salida(raiz: Path = RAIZ) -> list[str]:
             modulos: set[str] = set()  # `red.pedir(...)` / `egress.red.pedir(...)`
             for nodo in ast.walk(arbol):
                 if isinstance(nodo, ast.ImportFrom):
-                    if nodo.module == "egress.red":
+                    # WHY: un import RELATIVO (`from ..egress.red import pedir`,
+                    # `from .red import pedir`) es una salida igual de real. Se
+                    # reconoce por el ultimo segmento, que en este arbol solo lo
+                    # usa el punto de salida: si algun dia hubiera otro modulo
+                    # `red`, esto lo contaria de mas — y sobre-declarar un
+                    # destinatario es el lado seguro del error en un documento
+                    # que existe para no omitir ninguno.
+                    relativo_al_punto = (
+                        nodo.level > 0 and (nodo.module or "").split(".")[-1] == "red"
+                    )
+                    if nodo.module == "egress.red" or relativo_al_punto:
                         directos |= {
                             alias.asname or alias.name
                             for alias in nodo.names
