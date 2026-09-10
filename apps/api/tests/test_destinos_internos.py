@@ -362,3 +362,23 @@ async def test_declarar_exige_los_tres_campos_no_vacios(motor, campo: str) -> No
     async with sesion_de_inquilino(motor, inquilino) as conexion:
         with pytest.raises(ValueError):
             await declarar_destino(conexion, inquilino, **argumentos)
+
+
+async def test_exigir_destino_declarado_rechaza_un_destino_vacio_como_entrada_invalida(
+    motor,
+) -> None:
+    """Un destino vacio es un error de ENTRADA, no una pregunta legitima sobre lo
+
+    declarado (hallazgo de la revision cruzada): `declarar_destino` nunca guarda
+    un destino vacio, asi que sin esta comprobacion la busqueda simplemente no
+    encontraria nada y el llamador veria `DestinoNoDeclarado` — un `LookupError`
+    que confundiria "no escribiste nada" con "esto de verdad no esta declarado".
+    """
+    inquilino = sesion_de_cliente(AGENCIA_A, CLIENTE_A1)
+    async with sesion_de_inquilino(motor, inquilino) as conexion:
+        with pytest.raises(ValueError) as capturado:
+            await exigir_destino_declarado(conexion, inquilino, Canal.CORREO, "   ")
+    assert not issubclass(capturado.type, DestinoNoDeclarado), (
+        "un destino vacio tiene que fallar como entrada invalida, no como "
+        "'no declarado': son dos causas distintas"
+    )

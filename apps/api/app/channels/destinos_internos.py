@@ -285,9 +285,17 @@ async def exigir_destino_declarado(
     — RLS ya filtra por el inquilino de `conexion`. Se recibe explicito porque
     es el contrato que el plan (S4.1, paso 1 de la rama INTERNO) nombra: la
     firma dice PARA QUIEN se pregunta, no solo POR DONDE.
+
+    # WHY (`_exigir_no_vacio` en vez de un `.strip()` suelto): un destino vacio
+    # es un error de ENTRADA de quien llama, no una pregunta legitima sobre si
+    # algo esta declarado — `declarar_destino` nunca guarda un destino vacio, asi
+    # que buscar uno solo podia terminar en `DestinoNoDeclarado`, un `LookupError`
+    # que mezclaria dos causas distintas bajo el mismo mensaje (hallazgo Crisol).
     """
     canal = _validar_canal(canal)
-    destino = destino.strip()
+    destino = _exigir_no_vacio(
+        destino, campo="destino", motivo="no se puede exigir un destino vacio"
+    )
     fila = await _buscar_destino_activo(conexion, canal=canal, destino=destino)
     if fila is None:
         raise DestinoNoDeclarado(canal)
