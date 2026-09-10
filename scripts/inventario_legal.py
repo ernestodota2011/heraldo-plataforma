@@ -778,7 +778,7 @@ def _datos_derivados() -> list[dict[str, str]]:
                 "límite y una huella irreversible del par (inquilino, dirección de red "
                 "del remitente): la dirección no se guarda."
             ),
-            "procedencia": "apps/api/app/tenancy/limits.py:Limitador.clave",
+            "procedencia": "apps/api/app/tenancy/limits.py:LimitadorCompartido.clave",
         },
     ]
 

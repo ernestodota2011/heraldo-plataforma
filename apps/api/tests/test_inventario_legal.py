@@ -903,3 +903,88 @@ def test_un_modulo_de_salida_anidado_tampoco_se_escapa(guion, tmp_path) -> None:
         f"el barrido no vio un modulo de salida anidado; vio {vistos}"
     )
     assert sorted(set(vistos) - guion.MODULOS_DE_SALIDA_CONOCIDOS) == ["mensajes/whatsapp"]
+
+
+# ==========================================================================
+# La procedencia es una CITA: tiene que resolver contra el árbol
+# ==========================================================================
+_CITA = __import__("re").compile(r"^([\w./-]+\.py):([A-Za-z_][\w.]*|\d+)$")
+
+
+def _simbolos_de(arbol) -> set[str]:
+    """Nombres declarados en un módulo, con los de clase en forma `Clase.metodo`."""
+    import ast
+
+    fuera: set[str] = set()
+
+    def anda(nodo, prefijo: str = "") -> None:
+        for hijo in getattr(nodo, "body", []):
+            if isinstance(hijo, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                fuera.add(prefijo + hijo.name)
+                anda(hijo, prefijo + hijo.name + ".")
+            destinos = (
+                hijo.targets
+                if isinstance(hijo, ast.Assign)
+                else [hijo.target]
+                if isinstance(hijo, ast.AnnAssign)
+                else []
+            )
+            for destino in destinos:
+                if isinstance(destino, ast.Name):
+                    fuera.add(prefijo + destino.id)
+
+    anda(arbol)
+    return fuera
+
+
+def test_cada_procedencia_que_cita_el_codigo_resuelve_de_verdad(guion, conexion_admin) -> None:
+    """Una procedencia que nombra un símbolo inexistente es una cita falsa.
+
+    # WHY (lo cazó de verdad el 2026-09-09): tras renombrar el constructor de
+    # claves, una fila publicaba `limits.py:Limitador.clave` y la clase se llama
+    # `LimitadorCompartido`. El documento entero existe para que sus afirmaciones
+    # se puedan comprobar contra el código — una procedencia que no resuelve es
+    # exactamente el defecto que esta casilla previene, cometido por la casilla.
+    """
+    import ast
+
+    inventario = guion.derivar(conexion_admin)
+    filas = [
+        *inventario.datos,
+        *inventario.destinatarios,
+        *inventario.superficies,
+        *inventario.licencias,
+        *inventario.retencion,
+        *inventario.identidades,
+    ]
+
+    rotas: list[str] = []
+    comprobadas = 0
+    for fila in filas:
+        procedencia = str(fila.get("procedencia", ""))
+        # una procedencia puede llevar la cita y además una nota; se parte por
+        # los separadores que usa el generador y se mira cada trozo.
+        for trozo in __import__("re").split(r"\s+—\s+|\s+\(", procedencia):
+            casa = _CITA.match(trozo.strip().rstrip(")"))
+            if casa is None:
+                continue
+            ruta, simbolo = casa.groups()
+            archivo = RAIZ / ruta
+            comprobadas += 1
+            if not archivo.is_file():
+                rotas.append(f"{procedencia!r}: no existe {ruta}")
+                continue
+            texto = archivo.read_text(encoding="utf-8")
+            if simbolo.isdigit():
+                if not 1 <= int(simbolo) <= len(texto.splitlines()):
+                    rotas.append(f"{procedencia!r}: {ruta} no tiene la linea {simbolo}")
+            elif simbolo not in _simbolos_de(ast.parse(texto, filename=ruta)):
+                rotas.append(f"{procedencia!r}: {ruta} no declara {simbolo}")
+
+    assert comprobadas >= 10, (
+        f"control: solo se comprobaron {comprobadas} citas; si el formato de la "
+        "procedencia cambia, esta prueba pasaria sin mirar nada"
+    )
+    assert not rotas, "hay procedencias que no resuelven contra el arbol:\n  " + "\n  ".join(
+        rotas
+    )
