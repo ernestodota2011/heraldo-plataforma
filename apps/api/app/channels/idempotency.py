@@ -48,6 +48,7 @@ from sqlalchemy import text
 
 from app.tenancy import sesion_de_inquilino
 from app.tenancy.inquilino import Inquilino
+from app.tenancy.suspension import exigir_cliente_activo
 
 #: Prefijo de toda clave de idempotencia en Redis. Vive aqui, en un solo sitio:
 #: la limpieza de las pruebas lo DERIVA de esta constante en vez de escribirlo.
@@ -186,6 +187,20 @@ async def puerta(
     La marca de Redis se escribe **al salir del bloque sin error**, o sea despues
     de que la transaccion se confirme. Si el bloque lanza, la transaccion se
     deshace y Redis se queda como estaba: el mensaje podra volver a entrar.
+
+    # WHY (aqui vive el guard de RF-66, y no en la suite): esta es HOY la unica
+    # costura del producto donde se decide atender a un mensaje externo — la
+    # transaccion que abre es la misma en la que el mensaje se guarda y su respuesta
+    # se encola (D-04). Un cliente **suspendido** no envia ni responde, asi que la
+    # respuesta correcta es no llegar a reservar: `ClienteSuspendido` sube antes del
+    # `INSERT` y la transaccion se deshace entera. Reservarlo y no responder dejaria
+    # media operacion hecha —el mensaje marcado como visto sin que nadie lo atienda—
+    # y el reenvio del canal se descartaria como duplicado: el mensaje se perderia
+    # justo mientras el cliente estaba apagado.
+    #
+    # # WHY (se llama por NOMBRE de modulo y no se importa dentro de la funcion):
+    # que el nombre viva en el espacio de este modulo es lo que permite comprobar
+    # —quitandolo— que la sonda de la transicion mide el guard y no otra cosa.
     """
     clave = clave_de(inquilino, canal=canal, id_externo=id_externo)
     if await ya_visto(redis, clave):
@@ -193,6 +208,7 @@ async def puerta(
         return
 
     async with sesion_de_inquilino(motor, inquilino) as conexion:
+        await exigir_cliente_activo(conexion, inquilino)
         reserva = await reservar(conexion, inquilino, canal=canal, id_externo=id_externo)
         yield reserva, (conexion if reserva.es_nuevo else None)
 

@@ -75,6 +75,21 @@ PRIVILEGIOS_DE_APLICACION: dict[str, tuple[str, ...]] = {
     # serviria para reescribir la historia de que llego y que no; un `DELETE`,
     # para volver a procesar un mensaje que ya se proceso una vez.
     "mensajes_entrantes": VERBOS_DE_SOLO_INSERCION,
+    # --- la suspension y la aceptacion (revision 0010) ---
+    # RF-66: el historial de suspensiones se inserta y se ACTUALIZA —levantar
+    # cierra la fila poniendole `levantada_en`— y no se borra nunca: un corte que
+    # se puede hacer desaparecer no deja constancia de haber existido.
+    "suspensiones": ("SELECT", "INSERT", "UPDATE"),
+    # RF-66: una aceptacion es un hecho fechado. Reescribirla cambiaria QUE acepto
+    # el cliente y CUANDO; borrarla dejaria un alta sin la aceptacion que la
+    # autorizo. Solo insercion, igual que la bitacora.
+    "aceptaciones_contractuales": VERBOS_DE_SOLO_INSERCION,
+    # RF-66: el catalogo de versiones publicadas es de PLATAFORMA — no lleva
+    # inquilino, y por eso no lo gobierna RLS (allowlist con motivo en
+    # `test_rls_cobertura.py`). Se publica y se lee; **no** se corrige ni se borra:
+    # una version ya aceptada que cambiara de texto convertiria las aceptaciones
+    # que la nombran en firmas sobre un documento distinto.
+    "versiones_publicadas": VERBOS_DE_SOLO_INSERCION,
 }
 
 

@@ -67,6 +67,7 @@ from conftest import (
     AGENCIA_B,
     CLIENTE_A1,
     RAIZ,
+    alta_de_prueba,
     resembrar,
     sesion_de_agencia,
 )
@@ -109,7 +110,7 @@ async def test_un_alta_declarada_sanitaria_es_rechazada(motor) -> None:
     antes = await _cuantos_clientes(motor)
 
     with pytest.raises(AltaRechazada) as capturado:
-        await alta_de_cliente(
+        await alta_de_prueba(
             motor, sesion=OPERADOR, nombre="Consultorio del Doctor Ruiz", sector=Sector.SALUD
         )
 
@@ -130,7 +131,7 @@ async def test_un_nombre_compuesto_con_el_marcador_pegado_no_cuela(motor) -> Non
     """
     antes = await _cuantos_clientes(motor)
     with pytest.raises(AltaRechazada) as capturado:
-        await alta_de_cliente(
+        await alta_de_prueba(
             motor, sesion=OPERADOR, nombre="Policlinico", sector=Sector.COMERCIO
         )
     assert "clinica" in capturado.value.veredicto.marcadores
@@ -144,7 +145,7 @@ async def test_control_un_alta_normal_si_pasa(motor) -> None:
     """Si nada pudiera darse de alta, el guard seria un producto roto."""
     antes = await _cuantos_clientes(motor)
 
-    nuevo = await alta_de_cliente(
+    nuevo = await alta_de_prueba(
         motor,
         sesion=OPERADOR,
         nombre="Ferreteria Lopez",
@@ -175,7 +176,7 @@ async def test_el_alta_cuelga_de_la_agencia_de_la_sesion_y_no_de_un_parametro(mo
         "cruzada entre agencias"
     )
 
-    nuevo = await alta_de_cliente(
+    nuevo = await alta_de_prueba(
         motor, sesion=OPERADOR, nombre="Panaderia La Espiga", sector=Sector.COMERCIO
     )
     async with sesion_de_inquilino(motor, sesion_de_agencia(AGENCIA_A)) as conexion:
@@ -198,7 +199,7 @@ async def test_un_sector_que_no_se_puede_determinar_se_rechaza(motor, sector) ->
     """«No pude preguntar» no es «adelante» (RNF-04, fail-closed)."""
     antes = await _cuantos_clientes(motor)
     with pytest.raises(AltaRechazada) as capturado:
-        await alta_de_cliente(motor, sesion=OPERADOR, nombre="Negocio Cualquiera", sector=sector)
+        await alta_de_prueba(motor, sesion=OPERADOR, nombre="Negocio Cualquiera", sector=sector)
     assert capturado.value.veredicto.clasificacion is Clasificacion.INDETERMINADA
     assert await _cuantos_clientes(motor) == antes
 
@@ -211,7 +212,7 @@ async def test_un_nombre_que_contradice_al_sector_se_rechaza(motor) -> None:
     """
     antes = await _cuantos_clientes(motor)
     with pytest.raises(AltaRechazada) as capturado:
-        await alta_de_cliente(
+        await alta_de_prueba(
             motor, sesion=OPERADOR, nombre="Clinica Dental Sur", sector=Sector.COMERCIO
         )
     veredicto = capturado.value.veredicto
@@ -223,7 +224,7 @@ async def test_un_nombre_que_contradice_al_sector_se_rechaza(motor) -> None:
 async def test_la_contradiccion_tambien_se_busca_en_la_descripcion(motor) -> None:
     """El nombre se puede lavar; la descripcion es la segunda fuente."""
     with pytest.raises(AltaRechazada):
-        await alta_de_cliente(
+        await alta_de_prueba(
             motor,
             sesion=OPERADOR,
             nombre="Grupo Aurora",
@@ -234,7 +235,7 @@ async def test_la_contradiccion_tambien_se_busca_en_la_descripcion(motor) -> Non
 
 async def test_un_alta_sin_nombre_se_rechaza(motor) -> None:
     with pytest.raises(AltaRechazada) as capturado:
-        await alta_de_cliente(motor, sesion=OPERADOR, nombre="   ", sector=Sector.COMERCIO)
+        await alta_de_prueba(motor, sesion=OPERADOR, nombre="   ", sector=Sector.COMERCIO)
     assert capturado.value.veredicto.clasificacion is Clasificacion.INDETERMINADA
 
 
@@ -282,7 +283,7 @@ async def test_sin_regimen_interpretable_no_se_admite_ninguna_alta(
 
     antes = await _cuantos_clientes(motor)
     with pytest.raises(AltaRechazada) as capturado:
-        await alta_de_cliente(
+        await alta_de_prueba(
             motor, sesion=OPERADOR, nombre="Ferreteria Lopez", sector=Sector.COMERCIO
         )
     assert capturado.value.veredicto.clasificacion is Clasificacion.INDETERMINADA
@@ -331,7 +332,7 @@ def test_el_rechazo_por_centinela_ausente_dice_como_arreglarlo(
 async def test_un_usuario_de_portal_no_da_de_alta_clientes(motor) -> None:
     antes = await _cuantos_clientes(motor)
     with pytest.raises(PermisoDenegado):
-        await alta_de_cliente(
+        await alta_de_prueba(
             motor, sesion=USUARIO_DE_PORTAL, nombre="Ferreteria Lopez", sector=Sector.COMERCIO
         )
     assert await _cuantos_clientes(motor) == antes
@@ -623,7 +624,7 @@ async def _apuntes_de_reverificacion(motor) -> list:
 # El alta deja el sector escrito
 # --------------------------------------------------------------------------
 async def test_el_alta_persiste_el_sector_y_la_fecha_en_que_se_verifico(motor) -> None:
-    nuevo = await alta_de_cliente(
+    nuevo = await alta_de_prueba(
         motor, sesion=OPERADOR, nombre="Ferreteria Lopez", sector=Sector.COMERCIO
     )
     sector, verificado_en = await _ficha_de(motor, nuevo)
@@ -640,7 +641,7 @@ async def test_el_alta_persiste_el_sector_y_la_fecha_en_que_se_verifico(motor) -
 async def test_un_alta_rechazada_no_deja_ninguna_clasificacion(motor) -> None:
     """El control por el otro lado: lo rechazado no escribe ni fila ni sector."""
     with pytest.raises(AltaRechazada):
-        await alta_de_cliente(
+        await alta_de_prueba(
             motor, sesion=OPERADOR, nombre="Clinica Dental Sur", sector=Sector.COMERCIO
         )
     async with sesion_de_inquilino(motor, sesion_de_agencia(AGENCIA_A)) as conexion:
@@ -670,7 +671,7 @@ async def test_un_cliente_anterior_a_la_migracion_queda_indeterminado(motor) -> 
 # El cambio de sector: se reverifica y queda escrito
 # --------------------------------------------------------------------------
 async def test_el_cambio_de_sector_se_reverifica_y_deja_asiento_en_la_bitacora(motor) -> None:
-    nuevo = await alta_de_cliente(
+    nuevo = await alta_de_prueba(
         motor, sesion=OPERADOR, nombre="Ferreteria Lopez", sector=Sector.COMERCIO
     )
 
@@ -711,7 +712,7 @@ async def test_el_cambio_de_sector_se_reverifica_y_deja_asiento_en_la_bitacora(m
 
 async def test_reverificar_sin_cambiar_el_sector_tambien_deja_asiento(motor) -> None:
     """Refrescar la fecha tambien es una escritura, y ninguna es silenciosa."""
-    nuevo = await alta_de_cliente(
+    nuevo = await alta_de_prueba(
         motor, sesion=OPERADOR, nombre="Ferreteria Lopez", sector=Sector.COMERCIO
     )
     _, antes = await _ficha_de(motor, nuevo)
@@ -743,7 +744,7 @@ async def test_la_reverificacion_saca_a_un_cliente_de_indeterminado(motor) -> No
 # Fail-closed: lo mismo que en el alta, y nada se escribe
 # --------------------------------------------------------------------------
 async def test_reverificar_hacia_salud_se_rechaza_y_no_toca_la_fila(motor) -> None:
-    nuevo = await alta_de_cliente(
+    nuevo = await alta_de_prueba(
         motor, sesion=OPERADOR, nombre="Ferreteria Lopez", sector=Sector.COMERCIO
     )
     apuntes_antes = len(await _apuntes_de_reverificacion(motor))
@@ -768,7 +769,7 @@ async def test_reverificar_hacia_salud_se_rechaza_y_no_toca_la_fila(motor) -> No
 )
 async def test_un_sector_indeterminado_en_la_reverificacion_se_rechaza(motor, sector) -> None:
     """La misma tabla de casos que el alta: la regla es UNA, en dos momentos."""
-    nuevo = await alta_de_cliente(
+    nuevo = await alta_de_prueba(
         motor, sesion=OPERADOR, nombre="Ferreteria Lopez", sector=Sector.COMERCIO
     )
     with pytest.raises(ReverificacionRechazada) as capturado:
@@ -812,7 +813,7 @@ async def test_el_nombre_que_se_tamiza_es_el_persistido_y_no_el_que_traiga_quien
 
 async def test_la_descripcion_solo_puede_endurecer_el_veredicto(motor) -> None:
     """Se admite por parametro porque los marcadores solo se SUMAN."""
-    nuevo = await alta_de_cliente(
+    nuevo = await alta_de_prueba(
         motor, sesion=OPERADOR, nombre="Grupo Aurora", sector=Sector.COMERCIO
     )
     with pytest.raises(ReverificacionRechazada):
@@ -853,7 +854,7 @@ async def test_sin_regimen_interpretable_tampoco_se_reverifica(
     motor, tmp_path: Path, monkeypatch
 ) -> None:
     """El centinela es LOAD-BEARING tambien aqui, no solo en el alta."""
-    nuevo = await alta_de_cliente(
+    nuevo = await alta_de_prueba(
         motor, sesion=OPERADOR, nombre="Ferreteria Lopez", sector=Sector.COMERCIO
     )
     monkeypatch.setenv(VARIABLE_DE_ENTORNO_CENTINELA, str(tmp_path / "no-existe"))
@@ -897,7 +898,7 @@ async def test_un_operador_no_reverifica_al_cliente_de_otra_agencia(motor, motor
 
 
 async def test_un_usuario_de_portal_no_reverifica_el_sector(motor) -> None:
-    nuevo = await alta_de_cliente(
+    nuevo = await alta_de_prueba(
         motor, sesion=OPERADOR, nombre="Ferreteria Lopez", sector=Sector.COMERCIO
     )
     with pytest.raises(PermisoDenegado):
@@ -917,7 +918,7 @@ async def test_si_el_asiento_de_la_bitacora_falla_el_cambio_se_deshace(motor, mo
     # una transaccion propia para el apunte— la reclasificacion quedaria hecha SIN
     # rastro, que es lo que RF-10 prohibe.
     """
-    nuevo = await alta_de_cliente(
+    nuevo = await alta_de_prueba(
         motor, sesion=OPERADOR, nombre="Ferreteria Lopez", sector=Sector.COMERCIO
     )
     antes = await _ficha_de(motor, nuevo)
@@ -954,7 +955,7 @@ async def test_dos_reverificaciones_a_la_vez_no_inventan_una_transicion(motor) -
     # mirando `rowcount`: el informe mintiendo en la direccion mas cara. Aqui
     # `rowcount` no lo ve, porque la fila SI existe: lo que caduco es lo leido.
     """
-    nuevo = await alta_de_cliente(
+    nuevo = await alta_de_prueba(
         motor, sesion=OPERADOR, nombre="Ferreteria Lopez", sector=Sector.COMERCIO
     )
 

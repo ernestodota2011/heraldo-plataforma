@@ -7,6 +7,6 @@ que un `UPDATE` escrito por descuido —o por alguien que quiera tapar algo—
 revienta con `permission denied`, no con un comentario que nadie lee.
 """
 
-from app.audit.bitacora import Apunte, apuntar, leer_apuntes
+from app.audit.bitacora import Apunte, actor_opaco, apuntar, es_actor_opaco, leer_apuntes
 
-__all__ = ["Apunte", "apuntar", "leer_apuntes"]
+__all__ = ["Apunte", "actor_opaco", "apuntar", "es_actor_opaco", "leer_apuntes"]

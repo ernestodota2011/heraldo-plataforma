@@ -331,6 +331,26 @@ CAMPOS_PUBLICOS: dict[str, frozenset[str]] = {
     "mensajes_entrantes": frozenset(
         {"id", "agencia_id", "cliente_id", "canal", "id_externo", "trabajo_id", "recibido_en"}
     ),
+    # RF-66: la suspension entera es publicable dentro de su inquilino — el motivo
+    # es lo que el cliente tiene que subsanar, y ocultarselo convertiria el corte
+    # en inapelable. El «quien» ya viaja opaco desde que se escribe (RF-10).
+    "suspensiones": frozenset(
+        {
+            "id",
+            "agencia_id",
+            "cliente_id",
+            "motivo",
+            "suspendida_en",
+            "suspendida_por",
+            "levantada_en",
+            "levantada_por",
+        }
+    ),
+    # RF-66: que version acepto, quien y cuando. `version_id` apunta al catalogo
+    # publico de la plataforma, asi que enseñarlo no revela nada de nadie.
+    "aceptaciones_contractuales": frozenset(
+        {"id", "agencia_id", "cliente_id", "version_id", "aceptada_por", "aceptada_en"}
+    ),
 }
 
 

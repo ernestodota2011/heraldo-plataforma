@@ -52,7 +52,7 @@ from app.agents.providers import (
 )
 from app.tenancy import sesion_de_inquilino
 from app.tenancy.auth import Rol, Sesion
-from app.tenancy.baa_guard import Sector, alta_de_cliente
+from app.tenancy.baa_guard import Sector
 from app.tenancy.secrets import (
     SecretoEnClaro,
     SecretoEnLaRespuesta,
@@ -65,6 +65,7 @@ from conftest import (
     AGENCIA_A,
     CLIENTE_A1,
     RAIZ,
+    alta_de_prueba,
     resembrar,
     sesion_de_agencia,
     sesion_de_cliente,
@@ -373,7 +374,7 @@ CLAVE_DE_AGENCIA = "clave-de-agencia-de-prueba"
 
 
 async def _alta(motor, nombre: str, *, desarrollo: bool) -> UUID:
-    return await alta_de_cliente(
+    return await alta_de_prueba(
         motor, sesion=OPERADOR, nombre=nombre, sector=Sector.COMERCIO, desarrollo=desarrollo
     )
 
@@ -392,7 +393,7 @@ def _entorno_con_clave_de_agencia() -> dict[str, str]:
 
 async def test_el_alta_persiste_la_marca_de_desarrollo_y_por_defecto_es_real(motor) -> None:
     taller = await _alta(motor, "Taller de desarrollo", desarrollo=True)
-    real = await alta_de_cliente(
+    real = await alta_de_prueba(
         motor, sesion=OPERADOR, nombre="Negocio Real", sector=Sector.COMERCIO
     )
     async with sesion_de_inquilino(motor, sesion_de_agencia(AGENCIA_A)) as conexion:

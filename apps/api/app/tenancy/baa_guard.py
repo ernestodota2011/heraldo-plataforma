@@ -61,7 +61,6 @@ cumplir, en el gate que existe justo para romper esa clase de frase.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import unicodedata
@@ -74,7 +73,8 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from app.audit.bitacora import apuntar
+from app.audit.bitacora import actor_opaco, apuntar
+from app.tenancy.aceptacion import Aceptacion, exigir_aceptacion, registrar_aceptacion
 from app.tenancy.auth import Rol, Sesion
 from app.tenancy.inquilino import Inquilino
 from app.tenancy.sesion import sesion_de_inquilino
@@ -349,6 +349,7 @@ async def alta_de_cliente(
     sesion: Sesion,
     nombre: str,
     sector: object,
+    aceptacion: Aceptacion,
     descripcion: str = "",
     cliente_id: UUID | None = None,
     desarrollo: bool = False,
@@ -360,16 +361,25 @@ async def alta_de_cliente(
     y es la UNICA puerta a la clave de agencia. Por defecto `False`: un cliente del
     que nadie dijo «es de desarrollo» es real, y un cliente real no la toca.
 
-    Cuatro cosas, en este orden y sin forma de saltarse ninguna:
+    `aceptacion` (T-021·quinquies, RF-66) es **obligatoria y sin valor por
+    defecto**: que documentos acepto el cliente, en que version y quien. Un defecto
+    aqui —aunque fuera `None`— convertiria «sin aceptacion no hay alta» en «sin
+    aceptacion hay alta y ya se registrara luego».
+
+    Cinco cosas, en este orden y sin forma de saltarse ninguna:
 
     1. **RBAC (T-015)** — solo un operador de agencia da de alta clientes. Un
        usuario de portal de cliente recibe `PermisoDenegado`.
     2. **Guard de RNF-04 (T-021·bis)** — el veredicto decide, y solo
        `NO_SANITARIA` continua.
-    3. **Aislamiento (T-012)** — la fila se escribe por `sesion_de_inquilino`, con
+    3. **Aceptacion contractual (T-021·quinquies, RF-66)** — el ULTIMO paso antes
+       del `INSERT`. Aqui se comprueba lo que no necesita base; lo que si —que las
+       versiones existan en el catalogo y cubran los dos documentos— se comprueba
+       DENTRO de la transaccion, junto con su escritura.
+    4. **Aislamiento (T-012)** — la fila se escribe por `sesion_de_inquilino`, con
        las tres variables declaradas. La agencia sale de la SESION, jamas de un
        parametro: por eso esta funcion no acepta `agencia_id`.
-    4. **Persistencia del sector (T-021·ter)** — lo declarado queda EN la fila,
+    5. **Persistencia del sector (T-021·ter)** — lo declarado queda EN la fila,
        junto con la fecha en que se verifico. Sin eso el guard solo puede medir
        este instante, y RNF-04 caduca al dia siguiente en silencio.
     """
@@ -378,6 +388,25 @@ async def alta_de_cliente(
     veredicto = evaluar_alta(nombre=nombre, sector=sector, descripcion=descripcion)
     if not veredicto.admitida:
         raise AltaRechazada(veredicto)
+
+    # ------------------------------------------------------------------
+    # PASO DE ACEPTACION (T-021·quinquies · RF-66) — el ultimo antes del INSERT
+    #
+    # # WHY (aqui y no dentro de `evaluar_alta`): el guard sanitario decide sobre el
+    # TEXTO del alta y no toca la base; este decide sobre el CATALOGO. Mezclarlos
+    # daria un veredicto que a veces necesita conexion y a veces no, y la parte que
+    # falla cerrado por no poder consultar dejaria de distinguirse de la que falla
+    # cerrado por lo que dice el nombre.
+    #
+    # # WHY (la comprobacion pura ANTES y la escritura DENTRO de la transaccion):
+    # las filas de aceptacion cuelgan del cliente con clave foranea, asi que no
+    # pueden escribirse antes de que el cliente exista. Lo que si se puede rechazar
+    # sin abrir nada —que no venga aceptacion, que repita versiones, que el «quien»
+    # no sea opaco— se rechaza aqui, barato. Y lo que exige el catalogo va DENTRO:
+    # si falla, la transaccion se deshace y el alta **no ocurre** — que es como
+    # «sin aceptacion no hay alta» deja de ser una frase y pasa a ser el efecto.
+    # ------------------------------------------------------------------
+    aceptada = exigir_aceptacion(aceptacion)
 
     # El veredicto admitido garantiza que `sector` convierte: `evaluar_alta` ya lo
     # paso por el enum y devolvio INDETERMINADA si no.
@@ -405,6 +434,14 @@ async def alta_de_cliente(
                 # alta real. Aqui solo entra el booleano, y la fila lo dice.
                 "desarrollo": desarrollo is True,
             },
+        )
+        # La aceptacion, en la MISMA transaccion que la ficha. Si el catalogo no
+        # publica alguna de las versiones —o no cubren los dos documentos— esto
+        # lanza y el `INSERT` de arriba se deshace con ella: no queda cliente.
+        await registrar_aceptacion(
+            conexion,
+            Inquilino.desde_usuario(agencia_id=sesion.agencia_id, cliente_id=nuevo),
+            aceptada,
         )
     return nuevo
 
@@ -521,20 +558,16 @@ async def sector_persistido(
 
 
 def _actor_de(sesion: Sesion) -> str:
-    """Quien lo pidio, en la unica forma de identidad que hoy existe.
+    """Quien lo pidio, en la unica forma de identidad que hoy existe (RF-10).
 
-    # WHY (la HUELLA del identificador de sesion y no el identificador): el
-    # identificador de sesion es la clave de Redis con la que se REVOCA. Escribirlo
-    # en una tabla que nadie puede corregir dejaria una lista de mangos de
-    # revocacion vivos, para siempre, dentro del propio inquilino. La huella
-    # identifica igual —quien tenga el identificador puede recalcularla y correlar—
-    # y no sirve para tocar nada.
-    #
-    # # WHY (lleva el rol delante): un identificador opaco no dice nada a quien lee
-    # la bitacora. `operador_agencia:9f18…` se lee.
+    # WHY (la composicion vive en `app.audit.bitacora` y no aqui): hasta la
+    # revision 0010 este modulo componia `rol:huella` por su cuenta, y la
+    # suspension habria escrito la suya. Dos redacciones del mismo hecho divergen, y
+    # la que se queda vieja es la que nadie mira — en una tabla que nadie puede
+    # corregir. Ahora hay UNA (`actor_opaco`), y `es_actor_opaco` comprueba esa
+    # misma forma en la entrada de los verbos que la exigen.
     """
-    huella = hashlib.sha256(sesion.sesion_id.encode("utf-8")).hexdigest()[:16]
-    return f"{sesion.rol.value}:{huella}"
+    return actor_opaco(sesion.rol, sesion.sesion_id)
 
 
 async def reverificar_sector(

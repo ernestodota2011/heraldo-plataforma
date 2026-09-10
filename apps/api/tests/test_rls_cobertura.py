@@ -46,15 +46,32 @@ from app.tenancy.politicas import (
     VARIABLE_ALCANCE,
     VARIABLE_CLIENTE,
 )
-from app.tenancy.rol import ROL_APLICACION, sentencias_de_creacion
+from app.tenancy.rol import (
+    PRIVILEGIOS_DE_APLICACION,
+    ROL_APLICACION,
+    VERBOS,
+    sentencias_de_creacion,
+)
 
 CLASE_CLIENTE = "de cliente"
 CLASE_AGENCIA = "de agencia"
 CLASE_NO_INQUILINO = "no-inquilino"
 CLASE_MEDIA_CLAVE = "media-clave"
 
-#: UNICA excepcion admitida, con su motivo ESCRITO. Anadir una entrada aqui es
-#: un acto deliberado y revisable; olvidarse de anadirla pone el CI en rojo.
+#: Excepciones admitidas, con su motivo ESCRITO. Anadir una entrada aqui es un
+#: acto deliberado y revisable; olvidarse de anadirla pone el CI en rojo.
+#:
+#: # WHY (hay DOS formas de estar exenta, y NO son la misma): hasta la revision
+#: 0010 esta lista tenia una sola entrada y una sola justificacion — «la aplicacion
+#: no la alcanza». El catalogo de versiones publicadas (RF-66) es de plataforma y
+#: **si** tiene que alcanzarlo: sin leerlo no puede comprobar que la version que un
+#: cliente acepta existe. Meterlo aqui sin mas habria puesto el CI en rojo con
+#: razon; ==relajar la comprobacion a «no alcanza, salvo estas» habria sido rodear
+#: el guard en vez de arreglarlo== (`feedback_no_rodear_el_guard`). Lo que hacia
+#: falta era declarar la SEGUNDA forma y medirla con su propia vara: un catalogo de
+#: plataforma es alcanzable, pero **exactamente** con los verbos que declara
+#: `PRIVILEGIOS_DE_APLICACION` y con ninguno mas. La declaracion de abajo es esa
+#: vara; el motivo escrito sigue siendo obligatorio para las dos.
 ALLOWLIST_NO_INQUILINO: dict[str, str] = {
     "alembic_version": (
         "Catalogo de migraciones de Alembic. No contiene ningun dato de "
@@ -62,7 +79,39 @@ ALLOWLIST_NO_INQUILINO: dict[str, str] = {
         "aplicacion no tiene NINGUN privilegio sobre ella (se comprueba abajo), "
         "asi que no es alcanzable desde la aplicacion, con RLS o sin el."
     ),
+    "versiones_publicadas": (
+        "Catalogo de versiones publicadas del contrato y su anexo (RF-66, plan "
+        "§3.0). No contiene ningun dato de inquilino: una version es la MISMA para "
+        "todos los clientes, y por eso no lleva `agencia_id` ni `cliente_id` y no "
+        "hay expresion de RLS que escribirle — leerla entera no revela nada de "
+        "nadie. La aplicacion SI la alcanza, porque sin leerla no puede comprobar "
+        "que la version que un cliente acepta exista; su gobierno es el PRIVILEGIO, "
+        "declarado en CATALOGOS_DE_PLATAFORMA y medido por efecto abajo."
+    ),
 }
+
+#: Las tablas exentas que la aplicacion SI alcanza, por ser catalogos de la
+#: plataforma. La clave es la tabla; el valor, por que leerla no revela nada de
+#: ningun inquilino. Los VERBOS no se repiten aqui: se leen de
+#: `PRIVILEGIOS_DE_APLICACION`, que es donde ya viven — dos declaraciones del mismo
+#: permiso divergen, y la que se quede vieja sera la que nadie mira.
+CATALOGOS_DE_PLATAFORMA: dict[str, str] = {
+    "versiones_publicadas": (
+        "Cada fila es una version de un documento publico de la plataforma, "
+        "identica para todos los clientes: su nombre, su fecha, si declara la "
+        "instruccion permanente de derechos, si es de desarrollo y la huella de su "
+        "texto. No hay en ella ninguna columna que pertenezca a un inquilino, asi "
+        "que una lectura completa desde cualquier sesion no dice nada de nadie."
+    ),
+}
+
+#: Verbos que NINGUN catalogo de plataforma puede conceder.
+#:
+#: # WHY: una version ya aceptada que se pudiera reescribir —o borrar— convertiria
+#: las aceptaciones que la nombran en firmas sobre un documento distinto, sin que
+#: nada quedara registrado. La inmutabilidad de estos catalogos no es una costumbre
+#: del codigo: es un permiso que la base niega, igual que en la bitacora (RF-10).
+VERBOS_PROHIBIDOS_EN_CATALOGOS = ("UPDATE", "DELETE")
 
 _OR_SUELTO = re.compile(r"\bOR\b", re.IGNORECASE)
 
@@ -434,19 +483,87 @@ def test_la_allowlist_no_tiene_entradas_muertas(catalogo: dict) -> None:
     )
 
 
+def _privilegios_efectivos(conexion, tabla: str) -> set[str]:
+    return {
+        verbo
+        for verbo in VERBOS
+        if conexion.execute(
+            text("SELECT has_table_privilege(:rol, :tabla, :verbo)"),
+            {"rol": ROL_APLICACION, "tabla": tabla, "verbo": verbo},
+        ).scalar_one()
+    }
+
+
 def test_el_rol_de_aplicacion_no_alcanza_las_tablas_exentas(catalogo: dict, motor_admin) -> None:
-    """La excepcion se sostiene porque la aplicacion NO llega, no porque lo diga."""
+    """La excepcion se sostiene porque la aplicacion NO llega, no porque lo diga.
+
+    Vale para las exentas que NO son catalogo de plataforma. Las que si lo son
+    tienen su propia vara —igual de estrecha— en las dos pruebas de abajo.
+    """
     with motor_admin.connect() as conexion:
         for tabla in _de_clase(catalogo, CLASE_NO_INQUILINO):
-            for verbo in ("SELECT", "INSERT", "UPDATE", "DELETE"):
-                tiene = conexion.execute(
-                    text("SELECT has_table_privilege(:rol, :tabla, :verbo)"),
-                    {"rol": ROL_APLICACION, "tabla": tabla, "verbo": verbo},
-                ).scalar_one()
-                assert not tiene, (
-                    f"{ROL_APLICACION} tiene {verbo} sobre {tabla}, que esta exenta de "
-                    "RLS. La exencion solo vale si la aplicacion no la alcanza"
-                )
+            if tabla in CATALOGOS_DE_PLATAFORMA:
+                continue
+            efectivos = _privilegios_efectivos(conexion, tabla)
+            assert not efectivos, (
+                f"{ROL_APLICACION} tiene {sorted(efectivos)} sobre {tabla}, que esta "
+                "exenta de RLS y no se declara catalogo de plataforma. La exencion "
+                "solo vale si la aplicacion no la alcanza"
+            )
+
+
+def test_un_catalogo_de_plataforma_solo_concede_lo_que_declara(
+    catalogo: dict, motor_admin
+) -> None:
+    """La segunda forma de estar exenta, medida POR EFECTO y con su propia vara.
+
+    # WHY: un catalogo de plataforma se lee desde cualquier sesion, asi que su
+    # unica defensa es el privilegio. Aqui se compara el privilegio EFECTIVO con el
+    # DECLARADO en `PRIVILEGIOS_DE_APLICACION` — no con una copia escrita en este
+    # archivo, que divergiria— y se exige igualdad exacta en las dos direcciones:
+    # un verbo de mas es una puerta, uno de menos es una funcion rota.
+    """
+    with motor_admin.connect() as conexion:
+        for tabla, motivo in sorted(CATALOGOS_DE_PLATAFORMA.items()):
+            assert tabla in catalogo, (
+                f"CATALOGOS_DE_PLATAFORMA declara {tabla!r}, que no existe en el "
+                "esquema: una excepcion caducada tapa a la siguiente"
+            )
+            assert catalogo[tabla]["clase"] == CLASE_NO_INQUILINO, (
+                f"{tabla} se declara catalogo de plataforma y sus columnas la "
+                f"clasifican como {catalogo[tabla]['clase']}: o lleva claves de "
+                "inquilino y entonces es una tabla de inquilino, o la declaracion miente"
+            )
+            assert len(motivo.strip()) >= 40, f"el motivo de {tabla} no explica nada"
+
+            declarados = set(PRIVILEGIOS_DE_APLICACION.get(tabla, ()))
+            assert declarados, (
+                f"{tabla} es un catalogo alcanzable y no declara ningun verbo en "
+                "PRIVILEGIOS_DE_APLICACION: entonces no seria alcanzable, y el "
+                "producto que la consulta se caeria con permission denied"
+            )
+            prohibidos = declarados & set(VERBOS_PROHIBIDOS_EN_CATALOGOS)
+            assert not prohibidos, (
+                f"{tabla} declara {sorted(prohibidos)}: un catalogo de plataforma que "
+                "se puede reescribir convierte en firmas sobre otro documento todo lo "
+                "que apunte a sus filas"
+            )
+            efectivos = _privilegios_efectivos(conexion, tabla)
+            assert efectivos == declarados, (
+                f"{tabla}: la aplicacion tiene {sorted(efectivos)} y declara "
+                f"{sorted(declarados)}. Sobre una tabla sin RLS, el privilegio es la "
+                "unica defensa que hay"
+            )
+
+
+def test_la_declaracion_de_catalogos_de_plataforma_no_desborda_la_allowlist() -> None:
+    """Un catalogo alcanzable que no este tambien en la allowlist no tiene motivo."""
+    sin_motivo = sorted(set(CATALOGOS_DE_PLATAFORMA) - set(ALLOWLIST_NO_INQUILINO))
+    assert not sin_motivo, (
+        f"estas tablas se declaran catalogo de plataforma y no estan en "
+        f"ALLOWLIST_NO_INQUILINO: {sin_motivo}. La exencion de RLS y la razon por la "
+        "que la aplicacion puede alcanzarla son DOS decisiones, y las dos se escriben"
+    )
 
 
 def test_la_migracion_declara_cada_atributo_que_se_afirma() -> None:

@@ -34,7 +34,11 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.audit.bitacora import actor_opaco
 from app.tenancy import Inquilino, crear_motor
+from app.tenancy.aceptacion import Aceptacion
+from app.tenancy.auth import Rol
+from app.tenancy.baa_guard import alta_de_cliente
 from app.tenancy.rol import ROL_APLICACION
 from app.tenancy.secrets import (
     VARIABLE_DE_ENTORNO_CLAVE,
@@ -79,6 +83,35 @@ ARCHIVADO_B1 = UUID("bbbbbbbb-0000-4000-8000-00000000e0b1")
 MENSAJE_A1 = UUID("aaaaaaaa-0000-4000-8000-0000000090a1")
 MENSAJE_A2 = UUID("aaaaaaaa-0000-4000-8000-0000000090a2")
 MENSAJE_B1 = UUID("bbbbbbbb-0000-4000-8000-0000000090b1")
+SUSPENSION_A1 = UUID("aaaaaaaa-0000-4000-8000-0000000070a1")
+SUSPENSION_A2 = UUID("aaaaaaaa-0000-4000-8000-0000000070a2")
+SUSPENSION_B1 = UUID("bbbbbbbb-0000-4000-8000-0000000070b1")
+ACEPTACION_A1 = UUID("aaaaaaaa-0000-4000-8000-0000000080a1")
+ACEPTACION_A2 = UUID("aaaaaaaa-0000-4000-8000-0000000080a2")
+ACEPTACION_B1 = UUID("bbbbbbbb-0000-4000-8000-0000000080b1")
+
+# --------------------------------------------------------------------------
+# El catalogo de versiones publicadas (RF-66) — de DESARROLLO, y por que
+# --------------------------------------------------------------------------
+# # WHY: hoy el catalogo real esta VACIO a proposito — la fila del contrato y su
+# anexo las publica T-030·quater, con el texto que el abogado revise. Sembrar aqui
+# una version «de ejemplo» con texto seria publicar un contrato que nadie escribio.
+# Lo que la suite siembra son dos versiones marcadas `es_desarrollo = true` y sin
+# una sola letra de texto contractual: solo su nombre, su huella y las dos
+# banderas. Es exactamente el escenario que RF-66 admite mientras no exista la v2
+# —«hasta entonces solo hay altas de DESARROLLO»— y por eso la suite puede medir el
+# alta sin inventarse un contrato.
+VERSION_CONTRATO_DESARROLLO = UUID("cccccccc-0000-4000-8000-00000000d001")
+VERSION_ANEXO_DESARROLLO = UUID("cccccccc-0000-4000-8000-00000000d002")
+
+#: Nombre de las dos versiones sembradas. No es una version publicada de verdad y
+#: su nombre lo dice, para que nadie la confunda con la del catalogo real.
+NOMBRE_DE_VERSION_SEMBRADA = "0.0-desarrollo"
+
+#: Huella del texto de una version que no tiene texto. Es un centinela declarado,
+#: no el resumen de nada: la columna existe para que dos textos distintos con el
+#: mismo nombre sean dos filas, y aqui no hay ningun texto que resumir.
+HUELLA_DE_VERSION_SEMBRADA = "sin-texto-version-de-desarrollo"
 
 #: El nombre del secreto sembrado y su valor EN CLARO. El valor esta aqui a
 #: proposito y no es una credencial: es el testigo que la sonda de CE-06 busca en
@@ -270,6 +303,11 @@ def sembrar_escenario(conexion) -> None:
     la prueba mediria un escenario que ella misma recorto.
     """
     conexion.execute(text("DELETE FROM agencias"))
+    # El catalogo de versiones NO cuelga de la cascada —es de plataforma— asi que
+    # se limpia aparte. Va DESPUES del borrado de agencias: las aceptaciones que lo
+    # referencian ya se fueron con sus clientes, y sin ese orden la foranea lo
+    # impediria.
+    _sembrar_el_catalogo_de_versiones(conexion)
     conexion.execute(
         text(
             "INSERT INTO agencias (agencia_id, nombre) "
@@ -318,6 +356,16 @@ _APUNTE_DE = {"A1": APUNTE_A1, "A2": APUNTE_A2, "B1": APUNTE_B1}
 _TRABAJO_DE = {"A1": TRABAJO_A1, "A2": TRABAJO_A2, "B1": TRABAJO_B1}
 _ARCHIVADO_DE = {"A1": ARCHIVADO_A1, "A2": ARCHIVADO_A2, "B1": ARCHIVADO_B1}
 _MENSAJE_DE = {"A1": MENSAJE_A1, "A2": MENSAJE_A2, "B1": MENSAJE_B1}
+_SUSPENSION_DE = {"A1": SUSPENSION_A1, "A2": SUSPENSION_A2, "B1": SUSPENSION_B1}
+_ACEPTACION_DE = {"A1": ACEPTACION_A1, "A2": ACEPTACION_A2, "B1": ACEPTACION_B1}
+
+#: El «quien» de las filas sembradas, en la forma opaca que exige RF-10.
+#:
+#: # WHY (opaco tambien en la siembra): la bitacora se sembraba con `actor='siembra'`
+#: —una cadena que no tiene la forma que el producto escribe—. Las filas nuevas de
+#: RF-66 si la tienen, porque sus verbos la EXIGEN en la entrada: sembrarlas de otra
+#: forma habria dejado un escenario que el producto nunca podria haber producido.
+ACTOR_SEMBRADO = actor_opaco(Rol.OPERADOR_AGENCIA, "siembra-del-escenario")
 
 
 def valor_sembrado_del_secreto(etiqueta: str) -> str:
@@ -394,6 +442,91 @@ def _sembrar_la_base_y_la_cola(conexion) -> None:
             # siembra reventaria y la suite entera lo diria en el arranque.
             comun | {"id": _MENSAJE_DE[etiqueta], "externo": "mensaje-sembrado"},
         )
+        # WHY (la suspension sembrada nace YA LEVANTADA): la bateria de aislamiento
+        # exige una fila por inquilino en cada tabla de la clase *de cliente* — sin
+        # ella, media sonda mediria «no veo nada» sobre una tabla vacia. Pero una
+        # fila VIGENTE dejaria a los tres clientes sembrados suspendidos, y toda
+        # sonda que dependa de que el producto responda saldria verde por el motivo
+        # contrario. Una suspension del pasado, ya cerrada, cumple las dos cosas:
+        # existe como historial y no apaga a nadie.
+        conexion.execute(
+            text(
+                "INSERT INTO suspensiones (id, agencia_id, cliente_id, motivo, "
+                "       suspendida_por, levantada_en, levantada_por) "
+                "VALUES (:id, :a, :c, 'siembra: suspension ya levantada', :actor, "
+                "        now(), :actor)"
+            ),
+            comun | {"id": _SUSPENSION_DE[etiqueta], "actor": ACTOR_SEMBRADO},
+        )
+        # WHY (UNA aceptacion sembrada por inquilino, y no una por documento): la
+        # misma bateria exige que el portal vea EXACTAMENTE su fila y el operador
+        # exactamente las dos de sus clientes, asi que dos filas por inquilino la
+        # pondrian en rojo por el recuento y no por una fuga. La siembra es el
+        # minimo que la bateria necesita, no un alta completa: que una aceptacion
+        # cubra los DOS documentos exigidos se mide en `test_aceptacion.py`, sobre
+        # filas que la propia sonda escribe pasando por el producto.
+        conexion.execute(
+            text(
+                "INSERT INTO aceptaciones_contractuales "
+                "(id, agencia_id, cliente_id, version_id, aceptada_por) "
+                "VALUES (:id, :a, :c, :version, :actor)"
+            ),
+            comun
+            | {
+                "id": _ACEPTACION_DE[etiqueta],
+                "version": VERSION_CONTRATO_DESARROLLO,
+                "actor": ACTOR_SEMBRADO,
+            },
+        )
+
+
+def _sembrar_el_catalogo_de_versiones(conexion) -> None:
+    """Las dos versiones de DESARROLLO contra las que corre la suite (RF-66)."""
+    conexion.execute(text("DELETE FROM versiones_publicadas"))
+    for identificador, documento in (
+        (VERSION_CONTRATO_DESARROLLO, "contrato"),
+        (VERSION_ANEXO_DESARROLLO, "anexo_tratamiento"),
+    ):
+        conexion.execute(
+            text(
+                "INSERT INTO versiones_publicadas "
+                "(id, documento, version, declara_instruccion_de_derechos, "
+                " es_desarrollo, hash_del_texto) "
+                "VALUES (:id, :documento, :version, false, true, :hash)"
+            ),
+            {
+                "id": identificador,
+                "documento": documento,
+                "version": NOMBRE_DE_VERSION_SEMBRADA,
+                # WHY (`declara_instruccion_de_derechos = false`): una version de
+                # desarrollo NO declara la instruccion permanente de derechos de
+                # RF-62 — no puede, porque no tiene texto. Sembrarla en `true`
+                # habria dejado que una sonda diera por cumplida esa declaracion
+                # sin que ningun documento la contenga.
+                "hash": f"{HUELLA_DE_VERSION_SEMBRADA}-{documento}",
+            },
+        )
+
+
+def aceptacion_de_desarrollo(aceptada_por: str = ACTOR_SEMBRADO) -> Aceptacion:
+    """La aceptacion COMPLETA de las dos versiones sembradas.
+
+    # WHY (el valor por defecto vive AQUI y no en el producto): `alta_de_cliente`
+    # exige `aceptacion` sin defecto a proposito — un defecto ahi convertiria «sin
+    # aceptacion no hay alta» en «ya se registrara luego». Que las ~20 llamadas de
+    # la suite no repitan el andamiaje es un problema de la SUITE, y se resuelve en
+    # la suite.
+    """
+    return Aceptacion(
+        versiones=(VERSION_CONTRATO_DESARROLLO, VERSION_ANEXO_DESARROLLO),
+        aceptada_por=aceptada_por,
+    )
+
+
+async def alta_de_prueba(motor, **parametros):
+    """`alta_de_cliente` con la aceptacion de desarrollo puesta si no se declara otra."""
+    parametros.setdefault("aceptacion", aceptacion_de_desarrollo())
+    return await alta_de_cliente(motor, **parametros)
 
 
 @pytest.fixture
