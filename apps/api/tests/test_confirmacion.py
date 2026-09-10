@@ -119,6 +119,15 @@ SQL_DESTRUCTIVA_PERMITIDA: dict[str, str] = {
         "cliente vuelve a ser real y ninguno consume la clave de agencia — es la "
         "direccion segura, no una perdida de datos de cliente"
     ),
+    "apps/api/migrations/versions/0009_destinos_internos_de_aviso.py": (
+        "DDL de migracion, igual que la 0001 y la 0003: su `DROP TABLE` esta en el "
+        "`downgrade()` y lo ejecuta el rol MIGRADOR sobre el esquema, nunca la "
+        "aplicacion sobre los datos de un cliente. RNF-06 gobierna las operaciones "
+        "sobre datos de un cliente, y deshacer una migracion no es una de ellas — "
+        "el propio `downgrade()` explica por que el DROP es la direccion segura "
+        "para deshacer esta revision entera, sin version parcial mas segura que "
+        "conservar"
+    ),
 }
 
 

@@ -331,6 +331,22 @@ CAMPOS_PUBLICOS: dict[str, frozenset[str]] = {
     "mensajes_entrantes": frozenset(
         {"id", "agencia_id", "cliente_id", "canal", "id_externo", "trabajo_id", "recibido_en"}
     ),
+    # Nada aqui es material de secreto: `destino` es lo que el propio inquilino
+    # declaro (un correo, un webhook, un identificador de mensajeria), no una
+    # credencial — igual que `secretos.nombre` es publico y `secretos.cifrado` no.
+    "destinos_de_aviso": frozenset(
+        {
+            "id",
+            "agencia_id",
+            "cliente_id",
+            "canal",
+            "destino",
+            "etiqueta",
+            "activo",
+            "declarado_en",
+            "declarado_por",
+        }
+    ),
 }
 
 

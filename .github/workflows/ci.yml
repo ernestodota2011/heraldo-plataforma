@@ -181,6 +181,7 @@ jobs:
           apps/api/tests/test_prompt.py
           apps/api/tests/test_inyeccion.py
           apps/api/tests/test_proveedores.py
+          apps/api/tests/test_destinos_internos.py
 
       - name: Suite
         run: uv run --no-sync pytest
