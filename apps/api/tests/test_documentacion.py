@@ -95,6 +95,81 @@ def test_los_documentos_derivan_del_directorio_docs(tmp_path, monkeypatch) -> No
 
 
 # --------------------------------------------------------------------------
+# La cobertura misma: un ancla FUERA de README+docs/ aparenta estar
+# verificada y nunca se comprueba (hallazgo de Crisol, T-112)
+# --------------------------------------------------------------------------
+def test_un_ancla_fuera_de_la_cobertura_es_una_falta(tmp_path, monkeypatch) -> None:
+    """Un `.md` con la sintaxis de la convencion, fuera de README+docs/, y
+
+    nada la revisa — es EXACTAMENTE el fallo mudo que el resto de la casa
+    nombra una y otra vez: parece protegido y no lo esta.
+    """
+    gate = _gate()
+    (tmp_path / "README.md").write_text("# x\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "SECURITY.md").write_text(
+        "Afirmacion.\n<!-- respalda: a.py::t1 -->\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(gate, "RAIZ", tmp_path)
+    faltas = gate.verificar_cobertura()
+    assert len(faltas) == 1 and "SECURITY.md" in faltas[0]
+
+
+def test_un_readme_anidado_fuera_de_docs_tambien_cuenta(tmp_path, monkeypatch) -> None:
+    """No es solo la raiz: `apps/web/README.md` es el caso real de este repo."""
+    gate = _gate()
+    (tmp_path / "README.md").write_text("# x\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    anidado = tmp_path / "apps" / "web"
+    anidado.mkdir(parents=True)
+    (anidado / "README.md").write_text(
+        "Afirmacion.\n<!-- respalda: a.py::t1 -->\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(gate, "RAIZ", tmp_path)
+    faltas = gate.verificar_cobertura()
+    assert len(faltas) == 1 and "apps/web/README.md" in faltas[0]
+
+
+def test_un_md_fuera_de_cobertura_sin_ancla_no_es_falta(tmp_path, monkeypatch) -> None:
+    """CONTROL: el placeholder real de este repo (sin ancla) no dispara nada."""
+    gate = _gate()
+    (tmp_path / "README.md").write_text("# x\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    anidado = tmp_path / "packages" / "review"
+    anidado.mkdir(parents=True)
+    (anidado / "README.md").write_text(
+        "# packages/review — marcador de posicion\n\nSin afirmaciones aqui.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gate, "RAIZ", tmp_path)
+    assert gate.verificar_cobertura() == []
+
+
+def test_verificar_cobertura_ignora_venv_y_git(tmp_path, monkeypatch) -> None:
+    """Un `.venv` con miles de `.md` de dependencias no es documentacion nuestra."""
+    gate = _gate()
+    (tmp_path / "README.md").write_text("# x\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    venv_md = tmp_path / ".venv" / "Lib" / "site-packages" / "algo"
+    venv_md.mkdir(parents=True)
+    (venv_md / "CHANGELOG.md").write_text(
+        "<!-- respalda: a.py::t1 -->\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(gate, "RAIZ", tmp_path)
+    assert gate.verificar_cobertura() == []
+
+
+def test_el_readme_real_no_deja_ningun_ancla_fuera_de_su_propia_cobertura() -> None:
+    """Control sobre la REALIDAD: hoy `SECURITY.md` y los READMEs de marcador
+
+    de posicion (`apps/web`, `packages/review`) no usan la sintaxis de la
+    convencion en ningun sitio.
+    """
+    gate = _gate()
+    assert gate.verificar_cobertura() == []
+
+
+# --------------------------------------------------------------------------
 # Extraccion pura de anclas: sin pytest real de por medio
 # --------------------------------------------------------------------------
 def test_una_cita_bien_formada_se_reconoce_con_su_linea() -> None:
@@ -268,6 +343,25 @@ def test_una_cita_dentro_de_un_bloque_de_codigo_no_cuenta() -> None:
     # extractor que no reconociera NINGUN ancla pasaria la aserción de arriba.
     fuera_de_bloque = "Asi se cita una prueba:\n\n<!-- respalda: a.py::no_existe -->\n"
     assert len(gate.citas_de(fuera_de_bloque, "x.md")) == 1
+
+
+def test_un_bloque_con_lenguaje_declarado_tambien_oculta_su_cita() -> None:
+    """```python ... ``` cierra igual que ``` a secas (duda de Crisol, resuelta).
+
+    # WHY: Crisol pregunto si un cierre con "info-string" (el lenguaje que
+    # sigue a las backticks de apertura, `python` aqui) rompia la deteccion.
+    # No: `_CERCA_DE_BLOQUE` usa `.match()` sin ancla de fin de linea, asi que
+    # cualquier texto despues de las backticks de apertura es irrelevante para
+    # decidir si la linea ABRE o CIERRA un bloque. Verificado antes de aceptar
+    # el hallazgo como valido (`feedback_no_propagar_sin_verificar`): no
+    # necesitaba arreglo, necesitaba esta prueba que lo deje fijado.
+    """
+    gate = _gate()
+    texto = "```python\n<!-- respalda: a.py::no_existe -->\n```\n"
+    assert gate.citas_de(texto, "x.md") == [], (
+        "una cita dentro de un bloque con lenguaje declarado (```python) se "
+        "conto como si fuera real"
+    )
 
 
 def test_dos_bloques_de_codigo_dejan_la_cita_de_en_medio_visible() -> None:

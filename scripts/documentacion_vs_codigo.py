@@ -61,6 +61,17 @@ este guion. Anular `addopts` desde la propia invocacion hace que la salida sea
 la misma pase lo que pase con `addopts` en el futuro, en vez de depender de que
 nadie le añada una `-v` o una segunda `-q`.
 
+# LIMITE DECLARADO (pregunta de Crisol, T-112): este guion mide que el nodeid
+CITADO EXISTE en la coleccion de hoy — no que la prueba PASE, ni que su cuerpo
+siga diciendo lo que la afirmacion dice. Eso es a proposito, no un descuido: no
+hay forma barata de saber si una prueba pasa sin CORRERLA, y correr la suite
+entera aqui duplicaria exactamente lo que el paso "Suite" del mismo trabajo de
+CI ya hace, un paso despues. La garantia real es la SUMA de los dos pasos, en
+el mismo `ci.yml`, en el mismo job: este descarta que una cita apunte a algo
+que nunca existio o se borro/renombro; el otro exige que TODO lo que existe,
+incluida la prueba citada, pase. Un cambio que rompiera la prueba citada
+pondria el paso "Suite" en rojo, no este.
+
 Uso:
     uv run --no-sync python scripts/documentacion_vs_codigo.py
 """
@@ -271,6 +282,62 @@ def _documentos() -> list[Path]:
     return [ruta for ruta in rutas if ruta.is_file()]
 
 
+#: Directorios cuyo contenido nunca es documentacion versionada DE ESTE
+#: repositorio: dependencias instaladas, control de version, artefactos. Un
+#: `.venv` puede traer miles de `.md` de paquetes de terceros.
+_DIRECTORIOS_EXENTOS_DE_COBERTURA = frozenset(
+    {".venv", ".git", "node_modules", ".pytest_cache", "dist", "build", "__pycache__"}
+)
+
+
+def _fuera_de_cobertura() -> list[Path]:
+    """Todo `.md` del arbol que este gate NO revisa — el universo del riesgo mudo.
+
+    Hoy son reales: `SECURITY.md`, y los README de marcador de posicion bajo
+    `apps/web/` y `packages/review/`. Ninguno usa la convencion todavia, y esta
+    funcion es lo que se encarga de que, si algun dia alguno la usara SIN vivir
+    bajo `docs/`, el gate lo note en vez de dejarlo pasar en silencio.
+    """
+    cubiertos = {ruta.resolve() for ruta in _documentos()}
+    return [
+        ruta
+        for ruta in RAIZ.glob("**/*.md")
+        if ruta.is_file()
+        and not _DIRECTORIOS_EXENTOS_DE_COBERTURA & set(ruta.relative_to(RAIZ).parts)
+        and ruta.resolve() not in cubiertos
+    ]
+
+
+def verificar_cobertura() -> list[str]:
+    """Falta si algun `.md` FUERA de README+docs/ usa la sintaxis `respalda:`.
+
+    # WHY (hallazgo de Crisol, T-112): un ancla escrita por error —o a
+    # propósito, por alguien que no conoce el limite— en `SECURITY.md` o en el
+    # README de un paquete nuevo APARENTA estar verificada: tiene la sintaxis
+    # exacta de la convencion. Y el resto de este guion nunca la mira, porque
+    # `_documentos()` no la enumera. Es el mismo fallo mudo que el resto de la
+    # casa nombra una y otra vez —"parece protegido y no lo esta"— reproducido
+    # DENTRO del propio mecanismo que existe para cazarlo. Esta funcion no
+    # revisa esos documentos (siguen fuera del contrato de RF-31): solo exige
+    # que ninguno use la sintaxis, para que nadie confie en una cita que nunca
+    # se comprueba.
+    """
+    faltas: list[str] = []
+    for ruta in _fuera_de_cobertura():
+        origen = ruta.relative_to(RAIZ).as_posix()
+        texto = ruta.read_text(encoding="utf-8")
+        citas = citas_de(texto, origen)
+        if citas:
+            lineas = ", ".join(str(cita.linea) for cita in citas)
+            faltas.append(
+                f"{origen}: usa el ancla `respalda:` en la(s) linea(s) {lineas}, "
+                "fuera de README.md/docs/*.md — este gate no lo revisa, asi que "
+                "esa cita APARENTA estar verificada y nunca se comprueba. "
+                "Muevela bajo docs/, o quita la sintaxis si no es una cita real"
+            )
+    return faltas
+
+
 def main() -> int:
     documentos = _documentos()
     if not documentos:
@@ -290,6 +357,8 @@ def main() -> int:
         texto = documento.read_text(encoding="utf-8")
         total_citas += len(citas_de(texto, origen))
         faltas.extend(verificar_documento(texto, origen, nodeids))
+
+    faltas.extend(verificar_cobertura())
 
     if faltas:
         print(
