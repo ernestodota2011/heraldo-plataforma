@@ -1110,3 +1110,91 @@ async def test_un_secreto_dentro_del_detalle_aborta_el_registro(motor, motor_adm
     # rechazara todo pasaria la asercion de arriba sin medir nada.
     resultado = await _consumir(motor, inquilino, Decimal("1"))
     assert resultado.gastado_usd == Decimal("1")
+
+
+# ==========================================================================
+# LO QUE LEVANTO LA REVISION CRUZADA (Crisol)
+# ==========================================================================
+def test_un_fallo_de_la_base_a_mitad_de_carga_no_destruye_el_catalogo(motor_admin) -> None:
+    """La validacion previa cubre los errores de ENTRADA. Esto cubre los de la BASE.
+
+    # WHY (el disparador es un DESBORDAMIENTO numerico y no una entrada
+    # invalida): tiene que ser un error que la validacion NO pueda ver, o esta
+    # sonda mediria otra vez el guard de arriba. `numeric(12,6)` no admite 10^12,
+    # y eso solo lo sabe Postgres. Sin la transaccion explicita, el `DELETE` ya
+    # estaria confirmado cuando el `INSERT` revienta, y el catalogo vigente se
+    # habria perdido por un fallo del servidor.
+    """
+    from sqlalchemy.exc import DBAPIError
+
+    _cargar(motor_admin, _TARIFA)
+
+    with pytest.raises(DBAPIError):
+        _cargar(
+            motor_admin,
+            (
+                {"pais": "MX", "tipo": "utilidad", "precio_usd": "0.0050",
+                 "vigente_desde": "2025-07-01"},
+                {"pais": "US", "tipo": "utilidad", "precio_usd": "1000000000000",
+                 "vigente_desde": "2025-07-01"},
+            ),
+        )
+
+    with motor_admin.connect() as conexion:
+        cuantas = conexion.execute(text("SELECT count(*) FROM precios_por_pais")).scalar_one()
+    assert cuantas == len(_TARIFA), (
+        f"quedan {cuantas} filas de {len(_TARIFA)}: un fallo de la base a mitad de "
+        "carga se llevo el catalogo vigente. La carga tiene que ser atomica"
+    )
+
+
+async def test_una_conexion_asincrona_al_cargador_se_rechaza_ruidosa(motor) -> None:
+    """El error que NO daria error: cada `execute` seria una corrutina sin esperar.
+
+    # WHY: la carga no ocurriria, nadie levantaria, y `cargar_precios` devolveria
+    # el recuento de filas «cargadas» igual — un exito falso sobre la ruta del
+    # dinero. Es el defecto de contrato mezclado que levanto la revision cruzada.
+    """
+    async with sesion_de_inquilino(motor, sesion_de_cliente(AGENCIA_A, CLIENTE_A1)) as conexion:
+        with pytest.raises(TypeError, match="SINCRONA"):
+            cargar_precios(conexion, entradas=_TARIFA, fuente="sonda", cargada_en=MOMENTO)
+
+
+def test_un_precio_en_coma_flotante_se_rechaza_al_cargar(motor_admin) -> None:
+    """La misma politica que el monto: en dinero, el float no entra."""
+    with pytest.raises(ValueError, match="float"):
+        _cargar(
+            motor_admin,
+            ({"pais": "US", "tipo": "utilidad", "precio_usd": 0.014,
+              "vigente_desde": "2025-07-01"},),
+        )
+
+
+def test_un_precio_que_no_es_numero_se_rechaza_como_valueerror(motor_admin) -> None:
+    """`InvalidOperation` no es `ValueError`: sin traducirlo se sale del contrato.
+
+    Quien llama al cargador captura `ValueError` —es lo que levanta el resto de
+    la validacion— y un precio mal escrito se le escaparia por debajo.
+    """
+    with pytest.raises(ValueError, match="no es"):
+        _cargar(
+            motor_admin,
+            ({"pais": "US", "tipo": "utilidad", "precio_usd": "carisimo",
+              "vigente_desde": "2025-07-01"},),
+        )
+
+
+def test_el_catalogo_no_se_carga_sin_fuente(motor_admin) -> None:
+    """P-03: una cifra que gobierna dinero y no dice de donde salio no se audita."""
+    with pytest.raises(ValueError, match="fuente"):
+        _cargar(motor_admin, _TARIFA, fuente="   ")
+
+
+async def test_el_costo_de_un_mensaje_exige_un_instante_con_zona(motor, motor_admin) -> None:
+    """Sin zona no se puede decir si el catalogo caduco: es error de dominio."""
+    _cargar(motor_admin, _TARIFA)
+    async with sesion_de_inquilino(motor, sesion_de_cliente(AGENCIA_A, CLIENTE_A1)) as conexion:
+        with pytest.raises(ValueError, match="sin zona"):
+            await costo_de_mensaje(
+                conexion, "US", "utilidad", datetime(2026, 9, 15, 12, 0)  # noqa: DTZ001
+            )

@@ -56,7 +56,7 @@ import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -585,6 +585,14 @@ async def costo_de_mensaje(conexion, pais: str, tipo: str, ahora: datetime) -> C
     # RF-16 existe para impedir. Ante la duda, el error va en la direccion barata.
     """
     _tipo_valido(tipo)
+    # El mismo contrato que `inicio_del_mes`: un instante sin zona no dice cuando
+    # ocurrio, y compararlo con `cargada_en` (timestamptz) reventaria por TIPO en
+    # vez de decir que el error es de dominio. Lo senalo la revision cruzada.
+    if ahora.tzinfo is None:
+        raise ValueError(
+            f"{ahora!r} viene sin zona horaria: no se puede decir si el catalogo de "
+            "precios esta caducado respecto a un instante que no dice donde ocurrio"
+        )
     cargada_en = (await conexion.execute(_CATALOGO_CARGADO_EN)).one().cargada_en
     if cargada_en is None:
         raise CatalogoDePreciosVacio(
@@ -631,13 +639,13 @@ async def costo_de_mensaje(conexion, pais: str, tipo: str, ahora: datetime) -> C
 
 
 def cargar_precios(
-    conexion,
+    conexion_sincrona,
     *,
     entradas: Sequence[Mapping[str, Any]],
     fuente: str,
     cargada_en: datetime,
 ) -> int:
-    """Reemplaza el catalogo de precios ENTERO. Lo corre el rol migrador.
+    """Reemplaza el catalogo de precios ENTERO. Lo corre el rol MIGRADOR.
 
     # WHY (reemplaza y no fusiona): «el catalogo vigente» tiene que ser UNA cosa.
     # Una carga parcial dejaria filas viejas conviviendo con las nuevas y la
@@ -648,20 +656,55 @@ def cargar_precios(
     # mitad, el catalogo quedaria vacio o a medias — y con el catalogo vacio
     # `costo_de_mensaje` levanta, o sea que un archivo mal escrito apagaria el
     # conteo de dinero de todo el producto.
+    #
+    # ==WHY (ademas va en UNA transaccion explicita): la validacion previa cubre
+    # los errores de ENTRADA, y no los de la BASE.== Un desbordamiento numerico,
+    # un corte a mitad de los `INSERT` o un fallo del servidor dejarian el
+    # catalogo vaciado igual. Con la transaccion, o entra entero o no entra nada.
+    # Lo levanto la revision cruzada y lo mide
+    # `test_un_fallo_de_la_base_a_mitad_de_carga_no_destruye_el_catalogo`.
+    #
+    # ==WHY (el parametro se llama `conexion_sincrona` y el tipo se COMPRUEBA):
+    # el resto de este modulo es asincrono== y recibe una `AsyncConnection` en un
+    # parametro llamado `conexion`. Este no: lo corre el operador con el rol
+    # migrador, que en este repositorio es un motor SINCRONO. Pasarle por error
+    # una conexion asincrona no daria un error: `execute()` devolveria una
+    # corrutina que nadie espera, la carga no ocurriria, y la funcion devolveria
+    # el numero de filas «cargadas» tan tranquila — un exito falso sobre la ruta
+    # del dinero. Se comprueba el tipo para que ese error sea RUIDOSO.
     """
+    if hasattr(conexion_sincrona, "run_sync") or hasattr(conexion_sincrona, "__aenter__"):
+        raise TypeError(
+            "cargar_precios recibe una conexion SINCRONA (la del rol migrador) y se le "
+            "paso una asincrona. Sin esta comprobacion cada `execute` devolveria una "
+            "corrutina que nadie espera: no se cargaria nada y la funcion devolveria el "
+            "recuento igual, que es un exito falso sobre la ruta del dinero"
+        )
     if not entradas:
         raise ValueError(
             "no se admite cargar un catalogo de precios VACIO: dejaria la tabla sin "
             "ninguna fila, y sin ninguna fila no hay «precio mas alto conocido» — la "
             "rama del no de RF-16 se quedaria sin respaldo"
         )
+    if not isinstance(fuente, str) or not fuente.strip():
+        raise ValueError(
+            "el catalogo se carga SIEMPRE con su fuente: una cifra que gobierna dinero "
+            "y no dice de donde salio no se puede auditar (P-03)"
+        )
     validadas = [_entrada_valida(entrada) for entrada in entradas]
     _sin_llaves_repetidas(validadas)
 
-    conexion.execute(_VACIAR_PRECIOS)
-    for entrada in validadas:
+    # `begin()` sobre una conexion que venga en AUTOCOMMIT no daria atomicidad
+    # ninguna: se fija el nivel primero y solo despues se abre la transaccion.
+    conexion = conexion_sincrona.execution_options(isolation_level="READ COMMITTED")
+    with conexion.begin():
+        conexion.execute(_VACIAR_PRECIOS)
         conexion.execute(
-            _INSERTAR_PRECIO, entrada | {"fuente": fuente, "cargada_en": cargada_en}
+            _INSERTAR_PRECIO,
+            [
+                entrada | {"fuente": fuente, "cargada_en": cargada_en}
+                for entrada in validadas
+            ],
         )
     return len(validadas)
 
@@ -896,7 +939,16 @@ async def _alarma_si_toca(
 
 
 async def _precio_mas_alto(conexion, pais: str, tipo: str) -> Precio:
-    """El respaldo de la rama del no: el precio mas alto que se conoce."""
+    """El respaldo de la rama del no: el precio mas alto que se conoce.
+
+    # WHY (deliberadamente NO filtra por `vigente_desde`, y por eso puede elegir
+    # un precio que aun no esta en vigor): esto es un RESPALDO, no una tarifa. Se
+    # usa cuando ya se sabe que el dato bueno no esta —catalogo caducado, o pais
+    # sin fila—, y en esa situacion la pregunta no es «cual es el precio», es
+    # «cual es la cota superior de lo que puede costar». Un precio anunciado para
+    # el mes que viene es informacion sobre esa cota; descartarlo solo podria
+    # bajar el respaldo, que es la direccion cara. Lo senalo la revision cruzada.
+    """
     fila = (await conexion.execute(_PRECIO_MAS_ALTO)).one_or_none()
     if fila is None:
         raise CatalogoDePreciosVacio(
@@ -951,7 +1003,25 @@ def _entrada_valida(entrada: Mapping[str, Any]) -> dict[str, Any]:
         )
     _tipo_valido(str(entrada["tipo"]))
 
-    precio = Decimal(str(entrada["precio_usd"]))
+    # La misma politica que `_monto_valido`, por la misma razon: un precio en
+    # coma flotante no representa exactamente lo que dice, y este es el borde
+    # donde todavia se puede corregir. Lo pidio la revision cruzada.
+    if isinstance(entrada["precio_usd"], float):
+        raise ValueError(
+            f"precio {entrada['precio_usd']!r} para ({pais}, {entrada['tipo']}) es un "
+            "float: escribelo como texto o como Decimal. En una ruta de dinero no se "
+            "admite un tipo que no representa exactamente el valor que dice"
+        )
+    try:
+        precio = Decimal(str(entrada["precio_usd"]))
+    except InvalidOperation as fallo:
+        # `InvalidOperation` no es `ValueError`: sin esto, un precio mal escrito
+        # se saldria del contrato de errores del cargador y el llamante que
+        # captura `ValueError` lo dejaria escapar.
+        raise ValueError(
+            f"precio {entrada['precio_usd']!r} para ({pais}, {entrada['tipo']}): no es "
+            "un numero"
+        ) from fallo
     if precio < 0:
         raise ValueError(f"precio {precio} para ({pais}, {entrada['tipo']}): es negativo")
 
