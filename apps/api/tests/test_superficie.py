@@ -341,6 +341,23 @@ def test_control_el_dsn_declarado_si_se_lee(monkeypatch) -> None:
     assert dsn_de_aplicacion() == "postgresql+psycopg://x:y@z/w"
 
 
+def test_una_variable_declarada_pero_vacia_cuenta_como_no_declarada(monkeypatch) -> None:
+    """`HERALDO_DATABASE_URL=""` no es un DSN valido: es el mismo vacio que faltar.
+
+    # WHY (hallazgo de Crisol, T-112): la prueba de arriba solo ejercitaba la
+    # variable AUSENTE del entorno; una variable declarada con cadena vacia
+    # (un `.env` con `HERALDO_DATABASE_URL=` y nada despues, gotcha real de
+    # `docker-compose` y de scripts de arranque) toma un camino de codigo
+    # distinto (`os.environ.get` la ENCUENTRA) y solo el `if not dsn:` de
+    # `dsn_de_aplicacion` decide si eso cuenta como "declarada". Sin esta
+    # prueba, ese `if not dsn` (en vez de `if dsn is None`) podia cambiarse
+    # sin que nada lo notara.
+    """
+    monkeypatch.setenv("HERALDO_DATABASE_URL", "")
+    with pytest.raises(DsnNoDeclarado):
+        dsn_de_aplicacion()
+
+
 # ==========================================================================
 # T-024 / RF-51 — dos sondas, no una escrita dos veces
 # ==========================================================================

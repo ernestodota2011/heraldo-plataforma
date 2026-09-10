@@ -177,6 +177,32 @@ def test_si_una_de_varias_citas_no_existe_solo_esa_falla() -> None:
     assert "a.py::t1" not in faltas[0].split("cita a")[1]
 
 
+def test_una_coma_doble_deja_un_identificador_vacio_entre_medio() -> None:
+    """`a.py::t1,, b.py::t2` — el hueco entre las dos comas no es "ninguna cita".
+
+    # WHY (hallazgo de Crisol, T-112): el codigo YA manejaba este caso
+    # (`if not nodeid: faltas.append(...)`) desde el primer commit, pero nada
+    # en esta bateria lo ejercitaba — exactamente el punto ciego que P-44 ya
+    # nombro para OTRO guard: que el mecanismo haga lo correcto no vale nada
+    # si ninguna prueba lo comprueba.
+    """
+    gate = _gate()
+    texto = "afirmacion.\n<!-- respalda: a.py::t1,, b.py::t2 -->\n"
+    faltas = gate.verificar_documento(texto, "x.md", frozenset({"a.py::t1", "b.py::t2"}))
+    # CONTROL incluido en la misma aserción: si los dos nodeids REALES (a los
+    # dos lados del hueco) generaran su propia falta, aqui habria 3, no 1 — la
+    # unica falta real es la del hueco entre las dos comas.
+    assert len(faltas) == 1 and "vacio" in faltas[0]
+
+
+def test_una_cita_de_solo_espacios_entre_comas_tambien_es_un_hueco() -> None:
+    """`a.py::t1,   , b.py::t2` — espacios no son un nodeid tras recortarlos."""
+    gate = _gate()
+    texto = "afirmacion.\n<!-- respalda: a.py::t1,   , b.py::t2 -->\n"
+    faltas = gate.verificar_documento(texto, "x.md", frozenset({"a.py::t1", "b.py::t2"}))
+    assert len(faltas) == 1 and "vacio" in faltas[0]
+
+
 # --------------------------------------------------------------------------
 # SABOTAJES — los tres que el troceo exige, y el que da nombre al gate
 # --------------------------------------------------------------------------
@@ -256,6 +282,26 @@ def test_dos_bloques_de_codigo_dejan_la_cita_de_en_medio_visible() -> None:
     assert len(citas) == 1 and citas[0].crudo == "a.py::t1"
 
 
+def test_un_bloque_delimitado_con_virgulillas_tambien_oculta_su_cita() -> None:
+    """Markdown admite `~~~` ademas de tres backticks (hallazgo de Crisol, T-112).
+
+    # WHY: el resto de esta bateria solo ejercitaba el delimitador de
+    # backticks porque es el unico que este README usa hoy — pero la
+    # convencion RF-31 se aplica a `docs/*.md` en general, y un documento
+    # futuro que use `~~~` (CommonMark lo admite igual) no puede convertir su
+    # ejemplo de la convencion en una cita real solo por elegir el otro
+    # delimitador.
+    """
+    gate = _gate()
+    dentro = "Ejemplo:\n\n~~~\n<!-- respalda: a.py::no_existe -->\n~~~\n"
+    assert gate.citas_de(dentro, "x.md") == [], (
+        "una cita dentro de un bloque ~~~ se conto como si fuera real"
+    )
+    # CONTROL: la MISMA linea, fuera del bloque, si cuenta.
+    fuera = "Ejemplo:\n\n<!-- respalda: a.py::no_existe -->\n"
+    assert len(gate.citas_de(fuera, "x.md")) == 1
+
+
 # --------------------------------------------------------------------------
 # `nodeids_reales()` — la unica funcion que abre un proceso
 # --------------------------------------------------------------------------
@@ -273,6 +319,43 @@ def test_nodeids_reales_extrae_solo_las_lineas_con_nodeid(monkeypatch) -> None:
         gate.subprocess, "run", lambda *a, **k: _Recoleccion(0, salida)
     )
     assert gate.nodeids_reales() == frozenset({"a.py::test_1", "b.py::test_2[caso]"})
+
+
+def test_nodeids_reales_admite_espacios_dentro_del_parametrize(monkeypatch) -> None:
+    """72 casos REALES de este repositorio traen espacios en su `[id]` (Crisol, T-112).
+
+    # WHY: la sugerencia de Crisol de filtrar por caracteres permitidos
+    # (`[\\w\\[\\]\\-]+`) se probo contra la coleccion REAL antes de adoptarla y
+    # HABRIA excluido 72 nodeids verdaderos —`test_el_tamiz_dispara_donde_debe
+    # [Policlinico Norte]`, por ejemplo— convirtiendolos en invisibles para el
+    # gate (`feedback_no_propagar_sin_verificar`: el hallazgo era una hipotesis,
+    # y la fix concreta que traia no sobrevivio la medicion). Esta prueba fija
+    # que un espacio en el `[id]` no descarta la linea.
+    """
+    gate = _gate()
+    salida = "a.py::test_con_espacio[Policlinico Norte]\n1 test collected in 0.01s\n"
+    monkeypatch.setattr(gate.subprocess, "run", lambda *a, **k: _Recoleccion(0, salida))
+    assert gate.nodeids_reales() == frozenset({"a.py::test_con_espacio[Policlinico Norte]"})
+
+
+def test_nodeids_reales_descarta_una_linea_de_aviso_que_mencione_dos_puntos_dobles(
+    monkeypatch,
+) -> None:
+    """Una linea de warning/traceback con "::" en la PROSA no es un nodeid (Crisol).
+
+    # WHY: el filtro viejo (`"::" in linea`) aceptaria esta linea porque
+    # contiene la subcadena, aunque no tenga la FORMA de un nodeid real (no
+    # empieza en un `archivo.py` seguido de `::`). El filtro nuevo exige esa
+    # forma desde el primer caracter de la linea.
+    """
+    gate = _gate()
+    salida = (
+        "a.py::test_1\n"
+        "DeprecationWarning: usa Modulo::Clase en vez de la forma vieja\n"
+        "1 test collected in 0.01s\n"
+    )
+    monkeypatch.setattr(gate.subprocess, "run", lambda *a, **k: _Recoleccion(0, salida))
+    assert gate.nodeids_reales() == frozenset({"a.py::test_1"})
 
 
 def test_nodeids_reales_falla_si_pytest_no_pudo_recolectar(monkeypatch) -> None:
@@ -309,3 +392,44 @@ def test_nodeids_reales_invoca_el_mismo_interprete_sin_addopts_duplicado(monkeyp
     comando = capturado["comando"]
     assert comando[0] == gate.sys.executable
     assert "-o" in comando and comando[comando.index("-o") + 1] == "addopts="
+
+
+def test_nodeids_reales_declara_un_timeout_al_subproceso(monkeypatch) -> None:
+    """Sin techo de tiempo, una recoleccion colgada cuelga el CI entero (Crisol, T-112).
+
+    # WHY: `subprocess.run` sin `timeout=` espera para SIEMPRE si `pytest
+    # --collect-only` se cuelga (un conftest con un import circular, un fixture
+    # de sesion que abre una conexion y nunca la suelta). El job de CI tiene su
+    # propio `timeout-minutes: 15` como red de ultimo recurso, pero eso hace
+    # que el paso entero salga "cancelado" sin decir POR QUE — exactamente el
+    # patron que la Regla de Oro de la casa prohibe para procesos de larga
+    # duracion (timeout declarado, nunca implicito).
+    """
+    gate = _gate()
+    capturado: dict = {}
+
+    def _falso_run(comando, **kwargs):
+        capturado["kwargs"] = kwargs
+        return _Recoleccion(0, "a.py::t1\n")
+
+    monkeypatch.setattr(gate.subprocess, "run", _falso_run)
+    gate.nodeids_reales()
+    assert capturado["kwargs"].get("timeout"), (
+        "`subprocess.run` se invoco sin `timeout=`: una recoleccion colgada "
+        "colgaria este guion (y el paso de CI) sin limite"
+    )
+
+
+def test_nodeids_reales_falla_con_mensaje_claro_si_el_subproceso_se_cuelga(monkeypatch) -> None:
+    """Un cuelgue real se traduce a `RecoleccionFallida`, no a un traceback crudo."""
+    import subprocess as subprocess_real
+
+    gate = _gate()
+
+    def _cuelgue(comando, **kwargs):
+        raise subprocess_real.TimeoutExpired(cmd=comando, timeout=kwargs.get("timeout", 0))
+
+    monkeypatch.setattr(gate.subprocess, "run", _cuelgue)
+    with pytest.raises(gate.RecoleccionFallida) as capturado:
+        gate.nodeids_reales()
+    assert "tiempo" in str(capturado.value).lower() or "timeout" in str(capturado.value).lower()

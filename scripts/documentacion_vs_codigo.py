@@ -87,10 +87,14 @@ MARCADOR_SIN_RESPALDO = "sin respaldo"
 #: El grupo capturado es la carga CRUDA, sin recortar espacios de sobra.
 _ANCLA = re.compile(r"^\s*(?:>\s*)*<!--\s*respalda:\s*(.*?)\s*-->\s*$")
 
-#: Una linea que ABRE o CIERRA un bloque de codigo delimitado por backticks.
-#: No distingue abrir de cerrar a proposito: alternar sirve igual y no exige
-#: que la marca de cierre repita el lenguaje de apertura (```python ... ```).
-_CERCA_DE_BLOQUE = re.compile(r"^\s*```")
+#: Una linea que ABRE o CIERRA un bloque de codigo delimitado por backticks O
+#: por virgulillas (Markdown/CommonMark admite las dos formas). No distingue
+#: abrir de cerrar a proposito: alternar sirve igual y no exige que la marca de
+#: cierre repita el lenguaje de apertura (```python ... ```), ni que las dos
+#: marcas usen el MISMO delimitador (hallazgo de Crisol, T-112: un `docs/*.md`
+#: futuro que use `~~~` en vez de backticks no puede convertir su ejemplo de la
+#: convencion en una cita real solo por elegir el otro delimitador).
+_CERCA_DE_BLOQUE = re.compile(r"^\s*(?:```|~~~)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +175,35 @@ class RecoleccionFallida(RuntimeError):
     """`pytest` no pudo decir que pruebas existen: no hay verdad contra la que medir."""
 
 
+#: Segundos de margen antes de dar la recoleccion por colgada (hallazgo de
+#: Crisol, T-112). Sin este techo, un `conftest.py` con un import circular o un
+#: fixture de sesion que abre una conexion y no la suelta cuelga este guion
+#: PARA SIEMPRE — y con el, el paso de CI, que solo tiene el `timeout-minutes:
+#: 15` del trabajo entero como red de ultimo recurso (cancela el paso sin decir
+#: POR QUE). Es la misma Regla de Oro que ya aplica al resto de la casa: los
+#: procesos de larga duracion llevan timeout declarado, nunca implicito. 120s
+#: es generoso frente a lo medido en este repositorio (~6s con 890 pruebas):
+#: sobra margen para una maquina de CI mas lenta sin acercarse al limite del
+#: trabajo.
+TIMEOUT_RECOLECCION_SEGUNDOS = 120
+
+#: Una linea con la FORMA de un nodeid real: un archivo `.py` sin espacios,
+#: seguido de `::` y de lo que sea (los `[id]` de un parametrize SI pueden
+#: llevar espacios — ver el WHY de abajo). Reemplaza al filtro viejo
+#: (`"::" in linea`), que aceptaria como nodeid cualquier linea de aviso o
+#: traceback que mencionara "::" en su PROSA sin tener esa forma.
+#:
+#: WHY (por que no restringir los caracteres del `[id]`, como sugirio Crisol):
+#: se midio contra la coleccion real de este repositorio antes de adoptar una
+#: forma mas estricta (`feedback_no_propagar_sin_verificar`) y 72 nodeids
+#: REALES traen espacios en su parametrizacion
+#: (`test_el_tamiz_dispara_donde_debe[Policlinico Norte]`, por ejemplo) — una
+#: forma que solo admitiera `[\w\[\]-]+` los habria vuelto invisibles para el
+#: gate. Aqui solo se exige que el PREFIJO (hasta el primer `::`) no tenga
+#: espacios y termine en `.py`; el resto de la linea admite lo que sea.
+_LINEA_DE_NODEID = re.compile(r"^\S+\.py::.+$")
+
+
 def nodeids_reales() -> frozenset[str]:
     """El universo de la verdad de HOY: lo que `pytest --collect-only` devuelve.
 
@@ -180,20 +213,30 @@ def nodeids_reales() -> frozenset[str]:
     # entorno, sin depender de que "pytest" resuelva a lo mismo en el PATH ni de
     # pagar una segunda resolucion de `uv`.
     """
-    resultado = subprocess.run(  # noqa: S603 (argv fijo, sys.executable resuelto por Python)
-        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-o", "addopts="],
-        cwd=RAIZ,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        resultado = subprocess.run(  # noqa: S603 (argv fijo, sys.executable resuelto por Python)
+            [sys.executable, "-m", "pytest", "--collect-only", "-q", "-o", "addopts="],
+            cwd=RAIZ,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=TIMEOUT_RECOLECCION_SEGUNDOS,
+        )
+    except subprocess.TimeoutExpired as colgado:
+        raise RecoleccionFallida(
+            f"`pytest --collect-only` no termino en {TIMEOUT_RECOLECCION_SEGUNDOS}s "
+            "(tiempo de espera agotado): parece colgado, no lento. No se pudo "
+            "determinar que pruebas existen de verdad."
+        ) from colgado
     if resultado.returncode != 0:
         raise RecoleccionFallida(
             f"`pytest --collect-only` termino con codigo {resultado.returncode}: "
             "no se pudo determinar que pruebas existen de verdad.\n"
             f"--- salida ---\n{resultado.stdout}\n--- errores ---\n{resultado.stderr}"
         )
-    nodeids = frozenset(linea for linea in resultado.stdout.splitlines() if "::" in linea)
+    nodeids = frozenset(
+        linea for linea in resultado.stdout.splitlines() if _LINEA_DE_NODEID.match(linea)
+    )
     if not nodeids:
         raise RecoleccionFallida(
             "`pytest --collect-only` no recolecto NINGUNA prueba: el gate no "
@@ -209,6 +252,20 @@ def _documentos() -> list[Path]:
     # WHY: es lo que hace que un `docs/legal/` futuro (T-030·quater) entre solo
     # con tal de vivir bajo `docs/` — nada que cablear aqui para que su tabla
     # promesa -> evidencia empiece a verificarse con este mismo mecanismo.
+
+    # WHY (por que NO el arbol entero, pregunta de Crisol): el universo son las
+    # dos raices que la propia Regla de la casa nombra como "documentacion
+    # versionada" (README.md + docs/*.md, ver el bullet de "Reglas de la casa"
+    # del propio README) — el texto que describe CAPACIDADES del sistema para
+    # quien lo lee. `SECURITY.md`, `LICENSE` y `CHANGELOG*` son documentos
+    # legales/de proceso de GitHub, no afirmaciones tecnicas sobre lo que este
+    # software HACE; meterlos aqui exigiria decidir, archivo por archivo, cual
+    # de sus frases es una "afirmacion de capacidad" y cual no lo es —
+    # exactamente la lista escrita a mano que este mismo modulo evita en todos
+    # los demas ejes (P-51 confirma la frontera: RF-31 alcanza al texto que
+    # describe el sistema, no al que todavia no esta servido). Un documento
+    # nuevo que SI describa capacidades entra solo con tal de vivir bajo
+    # `docs/`, que es la generalizacion que este WHY ya declaraba.
     """
     rutas = [RAIZ / "README.md", *sorted(RAIZ.glob("docs/**/*.md"))]
     return [ruta for ruta in rutas if ruta.is_file()]
