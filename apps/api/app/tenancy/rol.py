@@ -75,6 +75,12 @@ PRIVILEGIOS_DE_APLICACION: dict[str, tuple[str, ...]] = {
     # serviria para reescribir la historia de que llego y que no; un `DELETE`,
     # para volver a procesar un mensaje que ya se proceso una vez.
     "mensajes_entrantes": VERBOS_DE_SOLO_INSERCION,
+    # --- destinos internos de aviso (revision 0009) ---
+    # RF-46-bis: se declara (INSERT) y se retira marcando `activo = false`
+    # (UPDATE, nunca DELETE: retirar no borra, la bitacora apunta el retiro y la
+    # fila sigue siendo la prueba de que existio). SELECT para listar y para el
+    # guard `exigir_destino_declarado`.
+    "destinos_de_aviso": ("SELECT", "INSERT", "UPDATE"),
 }
 
 

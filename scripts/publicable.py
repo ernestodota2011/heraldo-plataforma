@@ -118,6 +118,14 @@ EXENTAS: dict[str, str] = {
     "apps/api/tests/test_publicable.py": (
         "la bateria de este gate necesita muestras que disparen cada patron"
     ),
+    "apps/api/tests/test_destinos_internos.py": (
+        "T-118 (CE-07): declarar un destino `webhook_interno` con una direccion interna "
+        "se rechaza AL DECLARARLO. La direccion se DERIVA del prefijo 10.0.0.0/8 (RFC 1918) "
+        "con `ipaddress.ip_network(...)[1]`, igual que test_egreso_red.py y por el mismo "
+        "motivo (P-41): ninguna direccion concreta se escribe a mano, y esta no describe una "
+        "red real. La exencion levanta solo las formas ESTRUCTURALES; los terminos vigilados "
+        "siguen poniendo el archivo en rojo"
+    ),
 }
 
 _PALABRA = re.compile(r"[A-Za-zÀ-ɏ][A-Za-z0-9_À-ɏ-]{2,}")
