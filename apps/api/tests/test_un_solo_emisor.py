@@ -45,6 +45,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -89,6 +90,55 @@ _IMPORTA_EL_CLIENTE = re.compile(
     + r")\b",
     re.MULTILINE,
 )
+
+
+def _modulos_importados_por_ast(contenido: str) -> set[str]:
+    """Los modulos que el archivo importa de verdad, resueltos por su AST.
+
+    # WHY (hallazgo de Crisol en la revision cruzada de esta misma casilla): el
+    # regex de arriba ancla el import a como se ESCRIBE -- `import egress.mensajes`
+    # o `from egress.mensajes import entregar` -- y no reconoce la forma
+    # equivalente `from egress import mensajes`, que importa exactamente el mismo
+    # submodulo nombrando el PAQUETE en el `from` y el SUBMODULO en la lista de
+    # nombres: la cadena `egress.mensajes` nunca aparece junta en esa sintaxis, asi
+    # que ningun regex que la busque como texto la puede ver (medido por efecto:
+    # `_IMPORTA_EL_CLIENTE.search("from egress import mensajes\n")` da `None`). El
+    # AST no tiene ese punto ciego porque resuelve la ESTRUCTURA, no el texto: las
+    # dos formas resuelven al mismo modulo con nombre completo, `egress.mensajes`.
+    #
+    # No SUSTITUYE al regex de texto -- lo complementa (`feedback_sabotaje_audita_
+    # al_test`: un solo detector es un solo punto de fallo). Si el archivo no
+    # parsea (un binario truncado por el `errors="replace"` de mas abajo, por
+    # ejemplo), esta funcion devuelve un conjunto vacio en vez de reventar el
+    # barrido entero, y el regex de texto -- que nunca falla, solo puede no
+    # encontrar nada -- sigue midiendo igual: perder el AST no debe perder tambien
+    # la cobertura que la lectura tolerante ya gano.
+    """
+    try:
+        arbol = ast.parse(contenido)
+    except SyntaxError:
+        return set()
+
+    encontrados: set[str] = set()
+    for nodo in ast.walk(arbol):
+        if isinstance(nodo, ast.Import):
+            encontrados.update(alias.name for alias in nodo.names)
+        elif isinstance(nodo, ast.ImportFrom) and nodo.module:
+            # `from egress.mensajes import entregar` -- el propio modulo del `from`.
+            encontrados.add(nodo.module)
+            # `from egress import mensajes` -- el PAQUETE del `from` mas cada
+            # nombre importado, que es como Python resuelve un submodulo importado
+            # por esta forma.
+            encontrados.update(f"{nodo.module}.{alias.name}" for alias in nodo.names)
+    return encontrados
+
+
+def _modulos_del_cliente_importados(contenido: str) -> set[str]:
+    """Union de los dos detectores de (a), ya acotada a los modulos que importan."""
+    por_texto = {m.group(1) for m in _IMPORTA_EL_CLIENTE.finditer(contenido)}
+    por_ast = _modulos_importados_por_ast(contenido) & set(MODULOS_DEL_CLIENTE_DEL_CANAL)
+    return por_texto | por_ast
+
 
 #: (b) Dominios del canal, cada uno con su motivo escrito.
 DOMINIOS_DEL_CANAL: dict[str, str] = {
@@ -193,13 +243,13 @@ def buscar_violaciones(raiz: Path) -> list[Violacion]:
         contenido = archivo.read_text(encoding="utf-8", errors="replace")
 
         if archivo.suffix == ".py":
-            for encontrado in _IMPORTA_EL_CLIENTE.finditer(contenido):
+            for modulo in sorted(_modulos_del_cliente_importados(contenido)):
                 violaciones.append(
                     Violacion(
                         ruta=relativa,
                         regla="importa-el-cliente",
                         detalle=(
-                            f"importa {encontrado.group(1)!r} fuera de "
+                            f"importa {modulo!r} fuera de "
                             f"{RUTA_CANONICA}/: es el cliente del canal de "
                             "mensajeria (RF-38)"
                         ),
@@ -308,6 +358,32 @@ def test_sabotaje_una_copia_en_worker_egress_que_importa_el_cliente(tmp_path: Pa
 
     assert len(violaciones) == 1, violaciones
     assert violaciones[0].ruta == "apps/worker/egress/mensajes.py"
+    assert violaciones[0].regla == "importa-el-cliente"
+
+
+def test_sabotaje_from_egress_import_mensajes_tambien_es_el_cliente(tmp_path: Path) -> None:
+    """(1·bis, hallazgo de Crisol en la revision cruzada de esta misma casilla).
+
+    `from egress import mensajes` importa exactamente el mismo submodulo que
+    `from egress.mensajes import entregar` -- solo que nombra el PAQUETE en el
+    `from` y el SUBMODULO en la lista de nombres. El regex de (a) nunca ve la
+    cadena `egress.mensajes` junta en esta forma, y por eso no la cazaba: medido
+    por efecto ANTES de este test (`_IMPORTA_EL_CLIENTE.search` da `None`). No es
+    un caso de laboratorio: es sintaxis de Python tan valida como la otra forma.
+    """
+    _sembrar_arbol_valido(tmp_path)
+    rogue = tmp_path / "apps/worker/atajo.py"
+    rogue.write_text(
+        "from egress import mensajes\n\n\n"
+        "async def atajo(destinatario, contenido) -> None:\n"
+        "    await mensajes.entregar(destinatario, contenido)\n",
+        encoding="utf-8",
+    )
+
+    violaciones = buscar_violaciones(tmp_path)
+
+    assert len(violaciones) == 1, violaciones
+    assert violaciones[0].ruta == "apps/worker/atajo.py"
     assert violaciones[0].regla == "importa-el-cliente"
 
 
@@ -457,6 +533,29 @@ def test_la_deteccion_de_import_distingue_el_import_real_del_comentado() -> None
     # Control: lo que NO debe cazar.
     assert not _IMPORTA_EL_CLIENTE.search("# from egress.mensajes import entregar\n")
     assert not _IMPORTA_EL_CLIENTE.search("from egress.red import pedir\n")
+
+
+def test_la_deteccion_por_ast_resuelve_lo_que_el_regex_de_texto_no_ve() -> None:
+    """El sabotaje de (a·bis): sin el AST, `from egress import mensajes` es invisible.
+
+    Y el control en la otra direccion importa: el AST no debe convertirse en un
+    detector que dispare con CUALQUIER importacion del paquete `egress` -- solo
+    con la que de verdad resuelve al modulo del cliente del canal.
+    """
+    assert _modulos_del_cliente_importados("from egress import mensajes\n") == {
+        "egress.mensajes"
+    }
+    assert _modulos_del_cliente_importados("import egress.mensajes\n") == {
+        "egress.mensajes"
+    }
+    # Control: otro submodulo del mismo paquete -- el guard de red de T-300 -- no
+    # es el cliente del canal de mensajeria y no debe dispararse.
+    assert _modulos_del_cliente_importados("from egress import red\n") == set()
+    assert _modulos_del_cliente_importados("from egress.red import pedir\n") == set()
+    # Control de robustez: un archivo que no parsea no revienta el barrido -- el
+    # AST se rinde en silencio (conjunto vacio) y dejaria el resto en manos del
+    # regex de texto, que es justo lo que un archivo asi SI puede seguir midiendo.
+    assert _modulos_importados_por_ast("def sin_cerrar(:\n") == set()
 
 
 def test_la_deteccion_de_dominio_encuentra_los_tres_documentados() -> None:
