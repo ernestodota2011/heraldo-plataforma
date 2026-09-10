@@ -1245,3 +1245,89 @@ def test_el_catalogo_no_se_carga_con_una_fecha_sin_zona(motor_admin) -> None:
     """
     with pytest.raises(ValueError, match="sin zona"):
         _cargar(motor_admin, _TARIFA, cargada_en=datetime(2026, 9, 15, 12, 0))  # noqa: DTZ001
+
+
+async def test_veinte_consumos_concurrentes_no_superan_el_techo_de_la_agencia(
+    motor, motor_admin
+) -> None:
+    """El techo de la AGENCIA se serializa sobre SU fila, y es un cerrojo DISTINTO.
+
+    # WHY (no basta con la sonda del techo del cliente): son dos caminos de codigo
+    # distintos —uno bloquea la fila de `clientes`, el otro la de `agencias`— y el
+    # de la agencia es el que MAS lo necesita, porque su techo lo comparten todas
+    # las altas de desarrollo a la vez. Una sonda que solo mide el del cliente
+    # firmaria el otro sin haberlo tocado. Lo levanto la revision cruzada.
+    #
+    # Los consumos se reparten entre DOS clientes a proposito: si el cerrojo se
+    # tomara por cliente en vez de por agencia, cabrian seis en vez de tres y la
+    # suma se pasaria del techo. Aqui se veria.
+    """
+    techo = Decimal("10")
+    monto = Decimal("3")
+    tareas = 20
+    with motor_admin.connect() as conexion:
+        conexion.execute(
+            text("UPDATE agencias SET techo_usd_mes = :t WHERE agencia_id = :a"),
+            {"t": techo, "a": AGENCIA_A},
+        )
+    operador = sesion_de_agencia(AGENCIA_A)
+
+    async def gastar(cliente_id):
+        async with sesion_de_inquilino(motor, operador) as conexion:
+            return await registrar_consumo(
+                conexion,
+                operador,
+                concepto=CONCEPTO_MODELO,
+                monto_usd=monto,
+                detalle={},
+                cliente_id=cliente_id,
+                titular=Titular.AGENCIA,
+                ahora=MOMENTO,
+            )
+
+    resultados = await asyncio.gather(
+        *(
+            gastar(CLIENTE_A1 if indice % 2 == 0 else CLIENTE_A2)
+            for indice in range(tareas)
+        ),
+        return_exceptions=True,
+    )
+
+    aceptados = [r for r in resultados if not isinstance(r, BaseException)]
+    rechazados = [r for r in resultados if isinstance(r, BaseException)]
+    assert all(isinstance(r, TechoAlcanzado) for r in rechazados), (
+        f"algun rechazo no fue TechoAlcanzado: {[type(r).__name__ for r in rechazados]}"
+    )
+    with motor_admin.connect() as conexion:
+        suma = conexion.execute(
+            text("SELECT COALESCE(SUM(monto_usd), 0) FROM consumos WHERE titular = 'agencia'")
+        ).scalar_one()
+    assert suma <= techo, (
+        f"la suma final {suma} supera el techo de la agencia {techo}: entraron "
+        f"{len(aceptados)} de {tareas} consumos concurrentes. El techo de la agencia "
+        "no corta de verdad, y es el unico gasto que no paga un cliente"
+    )
+    assert len(aceptados) == 3, (
+        f"entraron {len(aceptados)} consumos de {monto} bajo un techo de {techo}: "
+        "caben exactamente 3, y los consumos se reparten entre DOS clientes — si el "
+        "cerrojo fuera por cliente, cabrian 6"
+    )
+
+
+async def test_exigir_margen_tampoco_carga_contra_la_agencia_desde_un_cliente(
+    motor,
+) -> None:
+    """La comprobacion previa falla-cerrado por la MISMA razon que el registro.
+
+    # WHY: `exigir_margen` lee el techo SIN cerrojo, y ahi cabia la duda de si el
+    # camino sin `FOR UPDATE` alcanzaba una fila que el camino con cerrojo no. No
+    # la alcanza, y por la POLITICA y no por un `if`: `agencias` es invisible al
+    # alcance cliente (L-02), asi que la lectura devuelve cero filas en los dos
+    # casos. Lo pregunto la revision cruzada; aqui esta medido.
+    """
+    cliente = sesion_de_cliente(AGENCIA_A, CLIENTE_A1)
+    async with sesion_de_inquilino(motor, cliente) as conexion:
+        with pytest.raises(SinTechoAlcanzable):
+            await exigir_margen(
+                conexion, cliente, Decimal("1"), titular=Titular.AGENCIA, ahora=MOMENTO
+            )
