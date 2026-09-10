@@ -78,6 +78,7 @@ Uso:
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -105,6 +106,15 @@ _ANCLA = re.compile(r"^\s*(?:>\s*)*<!--\s*respalda:\s*(.*?)\s*-->\s*$")
 #: marcas usen el MISMO delimitador (hallazgo de Crisol, T-112: un `docs/*.md`
 #: futuro que use `~~~` en vez de backticks no puede convertir su ejemplo de la
 #: convencion en una cita real solo por elegir el otro delimitador).
+#:
+#: LIMITE DECLARADO (Crisol volvio a preguntar): un bloque de codigo indentado
+#: con 4 espacios (la otra forma que admite CommonMark, sin backticks ni
+#: virgulillas) NO se reconoce. Es a proposito: distinguirlo de la indentacion
+#: de 2 espacios que la propia convencion usa para un item de lista exigiria
+#: contar columnas con precision de parser — el costo que este modulo declara
+#: no pagar desde su primer WHY ("no hace falta un parser de Markdown completo
+#: para esto"). Ningun documento de este repositorio usa bloques indentados
+#: hoy; si alguno los necesitara, se resuelve pasandolo a fenced (```).
 _CERCA_DE_BLOQUE = re.compile(r"^\s*(?:```|~~~)")
 
 
@@ -257,6 +267,40 @@ def nodeids_reales() -> frozenset[str]:
     return nodeids
 
 
+#: Directorios cuyo contenido nunca es documentacion versionada DE ESTE
+#: repositorio: dependencias instaladas, control de version, artefactos. Un
+#: `.venv` o un `node_modules` pueden traer miles de `.md` de paquetes de
+#: terceros — se PODAN durante el recorrido (no se filtran despues), para que
+#: un `apps/web/node_modules` futuro no vuelva lento a este gate (hallazgo de
+#: Crisol, T-112: `Path.glob("**/*.md")` SI desciende a esos directorios antes
+#: de que nada los descarte).
+_DIRECTORIOS_EXENTOS_DE_COBERTURA = frozenset(
+    {".venv", ".git", "node_modules", ".pytest_cache", "dist", "build", "__pycache__"}
+)
+
+
+def _markdown_bajo(raiz: Path) -> list[Path]:
+    """Todo `.md` bajo `raiz`, podando los directorios exentos AL DESCENDER.
+
+    # WHY (`os.walk` con poda in-place, no `Path.glob`): `glob("**/*.md")` no
+    # tiene forma de decirle "no entres ahi" — recorre TODO el subarbol y
+    # descarta despues, asi que un `.venv` o un `node_modules` grandes se
+    # recorren igual aunque su contenido nunca cuente. Podar `dirnames` en el
+    # propio recorrido de `os.walk` (mutando la lista in-place, que es la unica
+    # forma en que `os.walk` respeta la poda) evita bajar a esos directorios
+    # del todo.
+    """
+    encontrados: list[Path] = []
+    for actual, subdirectorios, archivos in os.walk(raiz):
+        subdirectorios[:] = [
+            d for d in subdirectorios if d not in _DIRECTORIOS_EXENTOS_DE_COBERTURA
+        ]
+        encontrados.extend(
+            Path(actual) / archivo for archivo in archivos if archivo.endswith(".md")
+        )
+    return sorted(encontrados)
+
+
 def _documentos() -> list[Path]:
     """README.md + todo `docs/*.md`. Se DERIVA del directorio, no se enumera.
 
@@ -278,16 +322,10 @@ def _documentos() -> list[Path]:
     # nuevo que SI describa capacidades entra solo con tal de vivir bajo
     # `docs/`, que es la generalizacion que este WHY ya declaraba.
     """
-    rutas = [RAIZ / "README.md", *sorted(RAIZ.glob("docs/**/*.md"))]
+    readme = RAIZ / "README.md"
+    directorio_docs = RAIZ / "docs"
+    rutas = [readme, *(_markdown_bajo(directorio_docs) if directorio_docs.is_dir() else [])]
     return [ruta for ruta in rutas if ruta.is_file()]
-
-
-#: Directorios cuyo contenido nunca es documentacion versionada DE ESTE
-#: repositorio: dependencias instaladas, control de version, artefactos. Un
-#: `.venv` puede traer miles de `.md` de paquetes de terceros.
-_DIRECTORIOS_EXENTOS_DE_COBERTURA = frozenset(
-    {".venv", ".git", "node_modules", ".pytest_cache", "dist", "build", "__pycache__"}
-)
 
 
 def _fuera_de_cobertura() -> list[Path]:
@@ -299,13 +337,7 @@ def _fuera_de_cobertura() -> list[Path]:
     bajo `docs/`, el gate lo note en vez de dejarlo pasar en silencio.
     """
     cubiertos = {ruta.resolve() for ruta in _documentos()}
-    return [
-        ruta
-        for ruta in RAIZ.glob("**/*.md")
-        if ruta.is_file()
-        and not _DIRECTORIOS_EXENTOS_DE_COBERTURA & set(ruta.relative_to(RAIZ).parts)
-        and ruta.resolve() not in cubiertos
-    ]
+    return [ruta for ruta in _markdown_bajo(RAIZ) if ruta.resolve() not in cubiertos]
 
 
 def verificar_cobertura() -> list[str]:

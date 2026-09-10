@@ -169,6 +169,50 @@ def test_el_readme_real_no_deja_ningun_ancla_fuera_de_su_propia_cobertura() -> N
     assert gate.verificar_cobertura() == []
 
 
+def test_un_ancla_valida_bajo_docs_anidado_no_es_falta_de_cobertura(
+    tmp_path, monkeypatch
+) -> None:
+    """CONTROL cruzado (Crisol): lo que `_documentos()` SI cubre no es "fuera".
+
+    # WHY: sin este control, un bug que hiciera que `_fuera_de_cobertura()` no
+    # restara bien lo que `_documentos()` ya cubre pasaria inadvertido — las
+    # pruebas de arriba solo fabrican casos FUERA de `docs/`, ninguna prueba
+    # que algo LEGITIMAMENTE dentro de `docs/legal/` (T-030·quater) no se
+    # reporte como fuga.
+    """
+    gate = _gate()
+    (tmp_path / "README.md").write_text("# x\n", encoding="utf-8")
+    legal = tmp_path / "docs" / "legal"
+    legal.mkdir(parents=True)
+    (legal / "promesas.md").write_text(
+        "Afirmacion.\n<!-- respalda: a.py::t1 -->\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(gate, "RAIZ", tmp_path)
+    assert gate.verificar_cobertura() == [], (
+        "un ancla dentro de docs/legal/ (cubierta de verdad) se reporto como "
+        "fuga de cobertura"
+    )
+
+
+def test_un_ejemplo_en_bloque_dentro_de_security_md_no_dispara_la_cobertura(
+    tmp_path, monkeypatch
+) -> None:
+    """Ni siquiera un EJEMPLO de la convencion, dentro de un bloque, en
+
+    un `.md` no cubierto, cuenta como fuga — mismo cuidado que dentro de
+    README/docs (Crisol).
+    """
+    gate = _gate()
+    (tmp_path / "README.md").write_text("# x\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "SECURITY.md").write_text(
+        "Asi se cita una prueba:\n\n```\n<!-- respalda: a.py::ejemplo -->\n```\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gate, "RAIZ", tmp_path)
+    assert gate.verificar_cobertura() == []
+
+
 # --------------------------------------------------------------------------
 # Extraccion pura de anclas: sin pytest real de por medio
 # --------------------------------------------------------------------------
