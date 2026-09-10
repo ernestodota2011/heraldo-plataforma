@@ -51,6 +51,7 @@ from app.main import (
 )
 from app.superficie_publica import ExposicionDeDocumentacion
 from app.tenancy import crear_motor
+from app.tenancy.sesion import DsnNoDeclarado, dsn_de_aplicacion
 from conftest import RAIZ
 from test_escalada_alcance import _fuentes_de_la_aplicacion
 
@@ -181,7 +182,14 @@ def test_el_comodin_se_rechaza_en_todos_los_entornos(comodin: str) -> None:
     "origen",
     [
         "http://127.0.0.1:3000",
-        "https://192.168.1.40",
+        # WHY (T-112, `id=` explicito): el valor crudo pondria `192.168.1.40`
+        # LITERAL en el nodeid — y citar ese nodeid en README.md (RF-31) haria
+        # que `scripts/publicable.py` (P-40, repositorio PUBLICO) marcara la
+        # documentacion por "IP privada RFC1918", aunque la IP sea un ejemplo
+        # de fixture y no una red real. El id descriptivo no cambia el CASO
+        # (sigue siendo la MISMA `origen`, recibida y rechazada), solo cambia
+        # como pytest lo nombra.
+        pytest.param("https://192.168.1.40", id="direccion-privada"),
         "http://10.20.1.50:8080",
         "https://mi-portal.localhost",
         "https://panel.ejemplo.com/",
@@ -305,6 +313,49 @@ def test_control_la_lista_declarada_se_lee_entera() -> None:
         Entorno.PRODUCCION, f" {ORIGEN_DECLARADO} , https://otro.example "
     )
     assert leidos == (ORIGEN_DECLARADO, "https://otro.example")
+
+
+# ==========================================================================
+# El DSN del rol de APLICACION: la tercera variable que "no se adivina"
+# ==========================================================================
+# WHY (T-112): el README afirma que las TRES variables de arranque —entorno,
+# origenes y el DSN de aplicacion— "se declaran; no se adivinan" y que, si
+# falta cualquiera, "el proceso no arranca y dice cual falta". Las dos
+# primeras ya tenian su prueba (arriba); esta tercera NO la tenia — el
+# mecanismo (`dsn_de_aplicacion`, en `app/tenancy/sesion.py`) ya hacia lo
+# correcto, pero nada en la suite lo ejercitaba. Lo encontro el propio gate de
+# documentacion <-> codigo (RF-31) al buscar la prueba real de esta afirmacion
+# y no hallarla: exactamente para eso existe.
+def test_sin_dsn_declarado_no_se_arranca_y_dice_cual_falta(monkeypatch) -> None:
+    monkeypatch.delenv("HERALDO_DATABASE_URL", raising=False)
+    with pytest.raises(DsnNoDeclarado) as capturado:
+        dsn_de_aplicacion()
+    assert "HERALDO_DATABASE_URL" in str(capturado.value), (
+        "el mensaje no dice CUAL variable falta: eso es lo que el README promete"
+    )
+
+
+def test_control_el_dsn_declarado_si_se_lee(monkeypatch) -> None:
+    """El control: la compuerta de arriba no rechaza TODO."""
+    monkeypatch.setenv("HERALDO_DATABASE_URL", "postgresql+psycopg://x:y@z/w")
+    assert dsn_de_aplicacion() == "postgresql+psycopg://x:y@z/w"
+
+
+def test_una_variable_declarada_pero_vacia_cuenta_como_no_declarada(monkeypatch) -> None:
+    """`HERALDO_DATABASE_URL=""` no es un DSN valido: es el mismo vacio que faltar.
+
+    # WHY (hallazgo de Crisol, T-112): la prueba de arriba solo ejercitaba la
+    # variable AUSENTE del entorno; una variable declarada con cadena vacia
+    # (un `.env` con `HERALDO_DATABASE_URL=` y nada despues, gotcha real de
+    # `docker-compose` y de scripts de arranque) toma un camino de codigo
+    # distinto (`os.environ.get` la ENCUENTRA) y solo el `if not dsn:` de
+    # `dsn_de_aplicacion` decide si eso cuenta como "declarada". Sin esta
+    # prueba, ese `if not dsn` (en vez de `if dsn is None`) podia cambiarse
+    # sin que nada lo notara.
+    """
+    monkeypatch.setenv("HERALDO_DATABASE_URL", "")
+    with pytest.raises(DsnNoDeclarado):
+        dsn_de_aplicacion()
 
 
 # ==========================================================================
