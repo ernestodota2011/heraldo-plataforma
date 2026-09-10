@@ -713,3 +713,53 @@ def test_control_un_paquete_no_condicionado_si_lee_sus_metadatos(guion) -> None:
     fila = filas["fastapi"]
     assert fila["fuente"].startswith("metadatos instalados"), fila["fuente"]
     assert fila["procedencia"] == "uv.lock:[[package]] + importlib.metadata"
+
+
+# ==========================================================================
+# Dos fallos distintos, dos códigos de salida distintos
+# ==========================================================================
+def test_no_poder_derivar_no_se_confunde_con_divergir(
+    guion, conexion_admin, tmp_path, monkeypatch, capsys
+) -> None:
+    """`1` = el documento diverge (regenera). `2` = no se pudo derivar (estructural).
+
+    # WHY: con un solo código, quien lee el CI ve el mismo rojo para «regenera el
+    # inventario» y para «hay una tabla nueva sin categoría», y prueba la receta
+    # equivocada. Además la excepción salía como traza cruda, que entierra el
+    # mensaje — y el mensaje es la parte escrita para ser leída.
+    """
+    inventario = guion.derivar(conexion_admin)
+    guion.escribir(inventario, salida=tmp_path)
+    assert guion.main(["--verificar", "--salida", str(tmp_path)]) == 0
+
+    # 1: lo comprometido dejo de ser lo derivado
+    comprometido = tmp_path / guion.NOMBRE_MD
+    comprometido.write_text(
+        comprometido.read_text(encoding="utf-8") + "\nalgo que nadie derivo\n",
+        encoding="utf-8",
+    )
+    assert guion.main(["--verificar", "--salida", str(tmp_path)]) == 1
+
+    # 2: no hay inventario que comparar, porque no se pudo derivar
+    monkeypatch.delenv(guion.VARIABLE_DSN_ADMIN, raising=False)
+    capsys.readouterr()
+    assert guion.main(["--verificar", "--salida", str(tmp_path)]) == 2
+    assert "NO DERIVABLE" in capsys.readouterr().err
+
+
+def test_el_barrido_de_prefijos_ve_una_constante_dentro_de_una_clase(guion, tmp_path) -> None:
+    """Una constante de prefijo dentro de una clase es igual de real.
+
+    # WHY (`feedback_analisis_incompleto_falla_caro`): el barrido estrecho —solo
+    # el nivel de módulo— no habría fallado con esta: la habría dejado fuera en
+    # silencio, y un dato sin fila en un documento público es un falso OK. Una
+    # falsa alarma, en cambio, cuesta declarar una línea de más.
+    """
+    modulo = tmp_path / "apps" / "api" / "app" / "tenancy" / "dentro.py"
+    modulo.parent.mkdir(parents=True)
+    modulo.write_text(
+        'class Almacen:\n    PREFIJO_DE_CLASE = "heraldo:dentro"\n', encoding="utf-8"
+    )
+    assert guion.constantes_de_prefijo(tmp_path) == [
+        "apps/api/app/tenancy/dentro.py:PREFIJO_DE_CLASE"
+    ]

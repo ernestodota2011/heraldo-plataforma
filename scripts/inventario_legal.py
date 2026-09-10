@@ -34,7 +34,16 @@ inventario que no pase el gate no se escribe.
 
 Uso:
     uv run --no-sync python scripts/inventario_legal.py              # escribe
-    uv run --no-sync python scripts/inventario_legal.py --verificar  # exit 1 si diverge
+    uv run --no-sync python scripts/inventario_legal.py --verificar  # comprueba
+
+Codigos de salida, uno por clase de fallo (no se mezclan: cada uno pide una
+receta distinta de quien lee el CI):
+
+- **0** — todo en orden.
+- **1** — lo comprometido en `docs/legal/` DIVERGE de lo derivado: se regenera.
+- **2** — NO SE PUDO DERIVAR el inventario (una tabla sin categoria, un
+  destinatario nuevo, el catalogo de otra rama, la salida no publicable). No se
+  arregla regenerando: hay que mirar lo que dice el mensaje.
 
 Necesita el DSN del rol migrador en `HERALDO_DATABASE_URL_ADMIN` y el esquema
 migrado: el bloque de datos se deriva del CATALOGO VIVO, igual que
@@ -52,6 +61,7 @@ import os
 import re
 import sys
 import tomllib
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import timedelta
 from importlib.metadata import PackageNotFoundError, distribution
@@ -400,7 +410,12 @@ def constantes_de_prefijo(raiz: Path = RAIZ) -> list[str]:
                 continue
             relativa = archivo.relative_to(raiz).as_posix()
             arbol = ast.parse(archivo.read_text(encoding="utf-8"), filename=relativa)
-            for nodo in arbol.body:  # solo nivel de MODULO: una constante no vive dentro
+            # WHY (`feedback_analisis_incompleto_falla_caro`): se recorre el arbol
+            # ENTERO, no solo el nivel de modulo. Una constante de prefijo declarada
+            # dentro de una clase es igual de real, y el recorrido estrecho la habria
+            # dejado fuera SIN fallar — un falso OK en un documento publico cuesta mas
+            # que una falsa alarma, que como mucho obliga a declarar una linea de mas.
+            for nodo in ast.walk(arbol):
                 destinos: list[ast.expr] = []
                 if isinstance(nodo, ast.Assign):
                     destinos = list(nodo.targets)
@@ -439,6 +454,7 @@ def exigir_que_todo_prefijo_este_inventariado(raiz: Path = RAIZ) -> None:
             f"PREFIJOS_INVENTARIADOS declara prefijos que ya no existen: {muertas}. Una "
             "declaracion caducada tapa a la siguiente que falte: quitala"
         )
+
 
 # ==========================================================================
 # Bloque 1 — DATOS: el catalogo vivo, y los derivados que no son tabla
@@ -1564,14 +1580,28 @@ def divergencias(inventario: Inventario, salida: Path = SALIDA_POR_DEFECTO) -> l
     return faltas
 
 
+@contextmanager
 def _conexion_de_admin():
+    """Conexion al catalogo vivo que ademas SUELTA el motor al salir.
+
+    # WHY: la version anterior devolvia `create_engine(...).connect()`, asi que el
+    # `with` cerraba la conexion y el motor —con su pool— se quedaba sin dueno
+    # hasta que muriera el proceso. En un guion corto no se nota, y por eso
+    # sobrevive: es la clase de fuga que solo duele cuando alguien reutiliza la
+    # funcion desde un proceso que no termina.
+    """
     dsn = os.environ.get(VARIABLE_DSN_ADMIN)
     if not dsn:
         raise SinCatalogo(
             f"falta {VARIABLE_DSN_ADMIN}: el bloque de datos se deriva del CATALOGO "
             "VIVO, y sin base no hay catalogo. No se inventa uno"
         )
-    return create_engine(dsn, future=True, isolation_level="AUTOCOMMIT").connect()
+    motor = create_engine(dsn, future=True, isolation_level="AUTOCOMMIT")
+    try:
+        with motor.connect() as conexion:
+            yield conexion
+    finally:
+        motor.dispose()
 
 
 def main(argumentos: list[str] | None = None) -> int:
@@ -1587,34 +1617,44 @@ def main(argumentos: list[str] | None = None) -> int:
     opciones = analizador.parse_args(argumentos)
     salida = Path(opciones.salida)
 
-    with _conexion_de_admin() as conexion:
-        inventario = derivar(conexion)
+    # WHY (dos fallos distintos, dos codigos distintos): «el documento diverge»
+    # se arregla regenerando, y «no se pudo derivar el inventario» es
+    # estructural — una tabla sin categoria, un destinatario nuevo, el catalogo
+    # de otra rama. Con un solo codigo de salida, quien lee el CI ve el mismo
+    # rojo para las dos y prueba la receta equivocada; y una traza cruda entierra
+    # el mensaje, que es justo la parte escrita para ser leida.
+    try:
+        with _conexion_de_admin() as conexion:
+            inventario = derivar(conexion)
 
-    if opciones.verificar:
-        faltas = divergencias(inventario, salida=salida)
-        if faltas:
-            print("INVENTARIO LEGAL DIVERGENTE:", file=sys.stderr)
-            for falta in faltas:
-                print(f"  {falta}", file=sys.stderr)
+        if opciones.verificar:
+            faltas = divergencias(inventario, salida=salida)
+            if faltas:
+                print("INVENTARIO LEGAL DIVERGENTE:", file=sys.stderr)
+                for falta in faltas:
+                    print(f"  {falta}", file=sys.stderr)
+                print(
+                    "\nLo que el piso legal publica tiene que ser lo que el codigo hace "
+                    "(RF-31). Regenera con "
+                    "`uv run --no-sync python scripts/inventario_legal.py`",
+                    file=sys.stderr,
+                )
+                return 1
             print(
-                "\nLo que el piso legal publica tiene que ser lo que el codigo hace "
-                "(RF-31). Regenera con "
-                "`uv run --no-sync python scripts/inventario_legal.py`",
-                file=sys.stderr,
+                f"inventario legal: {len(inventario.datos)} datos, "
+                f"{len(inventario.destinatarios)} destinatarios, "
+                f"{len(inventario.superficies)} superficies, "
+                f"{len(inventario.licencias)} paquetes — sin divergencias"
             )
-            return 1
-        print(
-            f"inventario legal: {len(inventario.datos)} datos, "
-            f"{len(inventario.destinatarios)} destinatarios, "
-            f"{len(inventario.superficies)} superficies, "
-            f"{len(inventario.licencias)} paquetes — sin divergencias"
-        )
-        return 0
+            return 0
 
-    escritos = escribir(inventario, salida=salida)
-    for destino in escritos:
-        print(f"escrito {destino}")
-    return 0
+        escritos = escribir(inventario, salida=salida)
+        for destino in escritos:
+            print(f"escrito {destino}")
+        return 0
+    except InventarioIncompleto as fallo:
+        print(f"INVENTARIO LEGAL NO DERIVABLE: {fallo}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
