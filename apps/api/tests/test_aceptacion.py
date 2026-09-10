@@ -559,11 +559,28 @@ async def test_sin_el_paso_de_suspension_un_vencido_sigue_encendido(
     # `test_pasado_el_plazo...` podria venir de cualquier otra cosa. Aqui se quita
     # EXACTAMENTE el mecanismo y se comprueba que, sin el, el cliente vencido se
     # queda encendido — que es el defecto que RF-66 existe para impedir.
+    #
+    # # WHY (el doble RESPETA el contrato de lo que sustituye, y esto costo un rojo
+    # de CI): la primera version devolvia `None`, que `suspender_cliente` no devuelve
+    # nunca. El barrido reventaba con `AttributeError` al leer el motivo y la sonda
+    # pasaba por una excepcion, no por la propiedad — habria seguido «verde» el dia
+    # que el mecanismo volviera. Un doble que no cumple la firma de lo que reemplaza
+    # mide su propio fallo. Este devuelve una suspension con la FORMA correcta y no
+    # escribe nada: el efecto medido —la fila que no existe— es el del verbo ausente.
     """
     from app.tenancy import aceptacion as modulo
+    from app.tenancy.suspension import Suspension
 
-    async def no_suspende(*_args, **_kwargs):
-        return None
+    async def no_suspende(_conexion, inquilino, *, motivo, actor):
+        return Suspension(
+            id=uuid4(),
+            cliente_id=inquilino.cliente_id,
+            motivo=motivo,
+            suspendida_en=datetime.now(UTC),
+            suspendida_por=actor,
+            levantada_en=None,
+            levantada_por=None,
+        )
 
     monkeypatch.setattr(modulo, "suspender_cliente", no_suspende)
 
