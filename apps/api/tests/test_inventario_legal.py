@@ -815,25 +815,24 @@ def test_una_salida_por_import_relativo_tampoco_se_escapa(guion, tmp_path) -> No
     modulo.parent.mkdir(parents=True)
     (arbol / "packages" / "egress").mkdir(parents=True)
     (arbol / "packages" / "egress" / "red.py").write_text(
-        "async def pedir(url):
-    return url
-", encoding="utf-8"
+        "\n".join(("async def pedir(url):", "    return url", "")), encoding="utf-8"
     )
     modulo.write_text(
-        "from ..egress.red import pedir
-
-
-async def fuera():
-"
-        "    return await pedir('x')
-",
+        "\n".join(
+            (
+                "from ..egress.red import pedir",
+                "",
+                "",
+                "async def fuera():",
+                "    return await pedir('x')",
+                "",
+            )
+        ),
         encoding="utf-8",
     )
     assert guion.llamantes_del_punto_de_salida(arbol) == ["packages/otro/salida.py"]
 
-    modulo.write_text("def nada():
-    return 1
-", encoding="utf-8")
+    modulo.write_text("\n".join(("def nada():", "    return 1", "")), encoding="utf-8")
     assert guion.llamantes_del_punto_de_salida(arbol) == []
 
 
