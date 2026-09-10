@@ -186,7 +186,11 @@ def buscar_violaciones(raiz: Path) -> list[Violacion]:
         relativa = archivo.relative_to(raiz).as_posix()
         if relativa in ARCHIVOS_EXENTOS_DEL_BARRIDO:
             continue
-        contenido = archivo.read_text(encoding="utf-8")
+        # `errors="replace"` (hallazgo de Crisol): un archivo con bytes que no son
+        # UTF-8 valido no debe hacer CAER el barrido entero con una traza -- debe
+        # seguir barriendo el resto y, si de verdad lleva un dominio o un import
+        # del cliente en la parte legible, seguir encontrandolo.
+        contenido = archivo.read_text(encoding="utf-8", errors="replace")
 
         if archivo.suffix == ".py":
             for encontrado in _IMPORTA_EL_CLIENTE.finditer(contenido):
@@ -222,10 +226,20 @@ def buscar_violaciones(raiz: Path) -> list[Violacion]:
 # ==========================================================================
 def test_control_el_barrido_real_encuentra_algo_que_mirar() -> None:
     """Sin este control, un barrido vacio pasaria las pruebas de abajo sin medir nada."""
+    # Las TRES raices existen hoy en el repositorio real -- si faltara una, la
+    # medida de mas abajo (>= 10 archivos en solo dos raices) podria seguir
+    # pasando sin que nadie se enterara de que la tercera desaparecio.
+    assert _raices_ausentes(RAIZ) == []
+
     archivos = _archivos_del_universo(RAIZ)
     assert len(archivos) >= 10, f"el barrido solo encontro {len(archivos)} archivos"
     relativas = {a.relative_to(RAIZ).as_posix() for a in archivos}
-    # Control de que las TRES raices, no solo una, aportan archivos de verdad.
+    # Control de que dos de las tres raices ya aportan archivos de verdad hoy.
+    # `apps/web` todavia no tiene contenido de las extensiones barridas (solo
+    # lleva un README) -- exigirlo aqui falsificaria el control, no lo
+    # reforzaria: lo cubren `test_sabotaje_sin_apps_web_...` (existencia) y
+    # `test_una_url_del_canal_en_un_archivo_del_panel_web_...` (contenido, con
+    # fixture) por separado.
     assert any(r.startswith("apps/api/") for r in relativas)
     assert any(r.startswith("apps/worker/") for r in relativas)
 
