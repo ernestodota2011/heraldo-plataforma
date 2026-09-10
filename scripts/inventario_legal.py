@@ -1052,7 +1052,10 @@ def licencia_instalada(nombre: str) -> dict[str, str] | None:
 
 
 def derivar_licencias(raiz: Path = RAIZ) -> list[dict[str, str]]:
-    """Los paquetes del bloqueo, con la licencia que dicen sus metadatos."""
+    """Los paquetes del bloqueo con su licencia: de los metadatos instalados, y de la
+    declaracion para los que `uv.lock` condiciona al sistema operativo (esos no se leen
+    de los metadatos ni donde estan, o el documento cambiaria segun donde se genere).
+    """
     bloqueo = _leer_bloqueo(raiz)
     condicionados = condicionados_por_sistema(bloqueo)
     filas: list[dict[str, str]] = []
@@ -1075,21 +1078,32 @@ def derivar_licencias(raiz: Path = RAIZ) -> list[dict[str, str]]:
 
         leida = licencia_instalada(nombre)
         declarada = LICENCIAS_DE_PAQUETES_CONDICIONADOS.get(nombre)
+        condicionado = nombre in condicionados
 
-        if leida is None:
-            if nombre not in condicionados:
-                raise EntornoNoCorrespondeAlBloqueo(
-                    f"`uv.lock` declara {nombre} y este entorno no lo tiene instalado: "
-                    "el inventario de licencias saldria corto y en verde. Sincroniza "
-                    "con `uv sync --locked --all-packages --dev`"
-                )
+        # WHY (medido el 2026-09-09, `feedback_verde_plataforma_no_importa`): la
+        # fila de un paquete condicionado al sistema operativo se redacta SIEMPRE
+        # desde la declaracion, lo instale este sistema o no. Antes salia de los
+        # metadatos cuando estaban y de la declaracion cuando no, asi que el MISMO
+        # arbol producia documentos distintos en Windows y en Linux: `--verificar`
+        # en el CI se habria puesto rojo contra un inventario generado en Windows
+        # por tres filas que nadie toco. La declaracion ya existia, pero solo
+        # evitaba la CAIDA; la DIVERGENCIA seguia viva — media solucion. Donde los
+        # metadatos se pueden leer, AUDITAN la declaracion en vez de redactar la
+        # fila: cada entorno comprueba lo que puede.
+        if condicionado:
             if declarada is None:
                 raise LicenciaCondicionadaSinDeclarar(
-                    f"{nombre} solo se instala en algunos sistemas operativos y este no "
-                    "es uno: sin una entrada en LICENCIAS_DE_PAQUETES_CONDICIONADOS el "
-                    "inventario diria cosas distintas segun donde se genere"
+                    f"{nombre} solo se instala en algunos sistemas operativos: sin una "
+                    "entrada en LICENCIAS_DE_PAQUETES_CONDICIONADOS el inventario diria "
+                    "cosas distintas segun donde se genere"
                 )
             campo, valor, motivo = declarada
+            if leida is not None and (campo, valor) != (leida["campo"], leida["valor"]):
+                raise DeclaracionDeLicenciaCaduca(
+                    f"la licencia declarada de {nombre} ya no coincide con la que dicen "
+                    f"sus metadatos en este entorno: declarada {campo}={valor!r}, leida "
+                    f"{leida['campo']}={leida['valor']!r}"
+                )
             filas.append(
                 {
                     "paquete": nombre,
@@ -1103,14 +1117,17 @@ def derivar_licencias(raiz: Path = RAIZ) -> list[dict[str, str]]:
             )
             continue
 
-        if declarada is not None and (declarada[0], declarada[1]) != (
-            leida["campo"],
-            leida["valor"],
-        ):
+        if declarada is not None:
             raise DeclaracionDeLicenciaCaduca(
-                f"la licencia declarada de {nombre} ya no coincide con la que dicen sus "
-                f"metadatos en este entorno: declarada {declarada[0]}={declarada[1]!r}, "
-                f"leida {leida['campo']}={leida['valor']!r}"
+                f"{nombre} tiene entrada en LICENCIAS_DE_PAQUETES_CONDICIONADOS y "
+                "`uv.lock` NO lo condiciona a ningun sistema: esa declaracion no la lee "
+                "nadie, y una declaracion muerta tapa a la siguiente que haga falta"
+            )
+        if leida is None:
+            raise EntornoNoCorrespondeAlBloqueo(
+                f"`uv.lock` declara {nombre} y este entorno no lo tiene instalado: "
+                "el inventario de licencias saldria corto y en verde. Sincroniza "
+                "con `uv sync --locked --all-packages --dev`"
             )
         filas.append(
             {

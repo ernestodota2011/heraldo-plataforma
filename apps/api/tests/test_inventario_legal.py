@@ -540,7 +540,7 @@ def test_el_json_es_legible_y_lleva_procedencia_en_cada_fila(guion, conexion_adm
 # ==========================================================================
 # La ficha de un proveedor: la region NO se publica sin su evidencia
 # ==========================================================================
-def _proveedor_de_sonda(guion, ficha):
+def _proveedor_de_sonda(ficha):
     from app.agents.providers import Proveedor
 
     return {
@@ -580,7 +580,7 @@ def test_la_region_de_un_proveedor_se_publica_con_quien_la_verifico_y_cuando(gui
         fuente="condiciones publicadas del proveedor",
     )
     fila = _fila_del_proveedor(
-        guion.derivar_destinatarios(lista_de_proveedores=_proveedor_de_sonda(guion, ficha))
+        guion.derivar_destinatarios(lista_de_proveedores=_proveedor_de_sonda(ficha))
     )
     assert fila["ubicacion"] == "region de sonda", (
         "la region publicada no es la de la ficha: " + fila["ubicacion"]
@@ -596,7 +596,7 @@ def test_la_region_de_un_proveedor_se_publica_con_quien_la_verifico_y_cuando(gui
 def test_control_un_proveedor_sin_ficha_no_afirma_ninguna_region(guion) -> None:
     """El control en la otra dirección: sin ficha no se inventa ni región ni evidencia."""
     fila = _fila_del_proveedor(
-        guion.derivar_destinatarios(lista_de_proveedores=_proveedor_de_sonda(guion, None))
+        guion.derivar_destinatarios(lista_de_proveedores=_proveedor_de_sonda(None))
     )
     assert "pendiente (T-100·bis)" in fila["ubicacion"]
     assert "2026" not in fila["procedencia"], (
@@ -671,3 +671,45 @@ def test_el_generador_se_niega_si_hay_un_prefijo_sin_inventariar(
     monkeypatch.setattr(guion, "PREFIJOS_INVENTARIADOS", declaradas)
     with pytest.raises(guion.PrefijoSinInventariar):
         guion.derivar(conexion_admin)
+
+
+# ==========================================================================
+# El documento no puede depender de DONDE se genere
+# ==========================================================================
+def test_la_fila_de_un_paquete_condicionado_no_depende_del_sistema_que_genere(guion) -> None:
+    """Windows y Linux tienen que escribir la MISMA fila, o el gate se rompe solo.
+
+    # WHY (`feedback_verde_plataforma_no_importa`, medido el 2026-09-09): hay
+    # paquetes que `uv.lock` condiciona al sistema operativo. En el sistema que
+    # SÍ los instala la fila salía de los metadatos; en el que no, de la
+    # declaración — así que el documento cambiaba según dónde se generase, y el
+    # `--verificar` del CI (Linux) se habría puesto rojo contra un inventario
+    # generado en Windows por tres filas que nadie tocó. La declaración existía
+    # ya, pero solo evitaba la CAÍDA; la DIVERGENCIA seguía. Ahora la fila
+    # publicada de un paquete condicionado sale siempre de la declaración, y los
+    # metadatos —donde se pueden leer— la AUDITAN en vez de redactarla.
+    """
+    condicionados = guion.condicionados_por_sistema(guion._leer_bloqueo(RAIZ))
+    assert condicionados, "control: uv.lock no condiciona ningun paquete al sistema"
+
+    filas = {fila["paquete"]: fila for fila in guion.derivar_licencias(RAIZ)}
+    for nombre in sorted(condicionados):
+        fila = filas[nombre]
+        assert fila["procedencia"].endswith("LICENCIAS_DE_PAQUETES_CONDICIONADOS"), (
+            f"la fila de {nombre} se redacto desde este sistema "
+            f"({fila['procedencia']}): en otro saldria distinta y el gate se pondria "
+            "rojo por el sistema operativo, no por un cambio real"
+        )
+        assert fila["fuente"].startswith("declarada"), fila["fuente"]
+
+
+def test_control_un_paquete_no_condicionado_si_lee_sus_metadatos(guion) -> None:
+    """El control en la otra dirección: la regla de arriba no aplana todo el bloque.
+
+    Si `derivar_licencias` pasara a declararlo TODO, la prueba anterior también
+    saldría verde — y el inventario de licencias dejaría de leer nada.
+    """
+    filas = {fila["paquete"]: fila for fila in guion.derivar_licencias(RAIZ)}
+    fila = filas["fastapi"]
+    assert fila["fuente"].startswith("metadatos instalados"), fila["fuente"]
+    assert fila["procedencia"] == "uv.lock:[[package]] + importlib.metadata"
