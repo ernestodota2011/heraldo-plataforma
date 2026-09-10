@@ -1017,3 +1017,55 @@ def test_cada_procedencia_que_cita_el_codigo_resuelve_de_verdad(guion, conexion_
     assert not rotas, "hay procedencias que no resuelven contra el arbol:\n  " + "\n  ".join(
         rotas
     )
+
+
+def test_una_salida_por_from_punto_import_red_tampoco_se_escapa(guion, tmp_path) -> None:
+    """`from . import red` ata el NOMBRE del alias, no el del módulo: se escapaba.
+
+    # WHY: en ese import `nodo.module` es `None`, así que la comprobación por el
+    # último segmento del módulo no lo veía. Es el mismo falso negativo que el
+    # alias, por otra puerta — y el falso negativo es el caro: una salida real
+    # que el inventario no nombra.
+    """
+    arbol = tmp_path / "arbol"
+    modulo = arbol / "packages" / "otro" / "salida.py"
+    modulo.parent.mkdir(parents=True)
+    (arbol / "packages" / "egress").mkdir(parents=True)
+    (arbol / "packages" / "egress" / "red.py").write_text(
+        "async def pedir(url):\n    return url\n", encoding="utf-8"
+    )
+    modulo.write_text(
+        "from . import red\n\n\nasync def fuera():\n    return await red.pedir('x')\n",
+        encoding="utf-8",
+    )
+    assert guion.llamantes_del_punto_de_salida(arbol) == ["packages/otro/salida.py"]
+
+    modulo.write_text("def nada():\n    return 1\n", encoding="utf-8")
+    assert guion.llamantes_del_punto_de_salida(arbol) == []
+
+
+def test_cada_patron_de_clave_empieza_por_el_prefijo_de_su_modulo(guion) -> None:
+    """El patrón se corta por una sonda: si cortara de más, aquí se ve.
+
+    # WHY: `_patron_de_clave` parte la clave construida por la sonda. Si la sonda
+    # apareciera antes de lo previsto, el patrón saldría corto y el documento
+    # publicaría una familia de claves que no es la que existe. Esto lo ata a las
+    # constantes que declaran el prefijo, que es lo único que no depende del corte.
+    """
+    from app.channels import idempotency
+    from app.tenancy import auth, limits
+
+    patrones = guion.patrones_de_clave()
+    esperado = {
+        "idempotencia": idempotency.PREFIJO,
+        "sesion": auth.PREFIJO_POR_DEFECTO,
+        "limite": limits.PREFIJO_POR_DEFECTO,
+    }
+    assert set(patrones) == set(esperado), patrones
+    for familia, prefijo in esperado.items():
+        patron = patrones[familia]
+        assert patron.startswith(prefijo + ":"), (
+            f"el patron de {familia} ({patron!r}) no empieza por el prefijo que declara "
+            f"su modulo ({prefijo!r}): el corte por la sonda se comio parte de la clave"
+        )
+        assert patron.endswith(":*"), patron

@@ -403,6 +403,14 @@ def llamantes_del_punto_de_salida(raiz: Path = RAIZ) -> list[str]:
                     relativo_al_punto = (
                         nodo.level > 0 and (nodo.module or "").split(".")[-1] == "red"
                     )
+                    if nodo.level > 0 and not nodo.module:
+                        # `from . import red`: el modulo es None y lo que se ata
+                        # es el NOMBRE del alias, no el del modulo importado.
+                        modulos |= {
+                            alias.asname or alias.name
+                            for alias in nodo.names
+                            if alias.name == "red"
+                        }
                     if nodo.module == "egress.red" or relativo_al_punto:
                         directos |= {
                             alias.asname or alias.name
