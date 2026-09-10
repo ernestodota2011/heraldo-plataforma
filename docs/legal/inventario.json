@@ -1,0 +1,665 @@
+{
+  "bloques": {
+    "datos": [
+      {
+        "alcance": "de agencia",
+        "categoria": "plataforma",
+        "contenido": "Identificador y nombre comercial de la agencia inquilina, con su fecha de alta. No contiene datos de ninguna persona.",
+        "forma": "tabla del catálogo",
+        "nombre": "agencias",
+        "procedencia": "apps/api/migrations/versions/0001_cimiento_del_inquilino.py:64"
+      },
+      {
+        "alcance": "no-inquilino",
+        "categoria": "plataforma",
+        "contenido": "Catálogo de migraciones aplicadas: solo el identificador de la revisión. El rol de aplicación no tiene ningún privilegio sobre ella.",
+        "forma": "tabla del catálogo",
+        "nombre": "alembic_version",
+        "procedencia": "no la crea ninguna migración de este repositorio"
+      },
+      {
+        "alcance": "de cliente",
+        "categoria": "bitácora",
+        "contenido": "Registro de solo inserción de quién hizo qué y cuándo sobre datos de un cliente (RF-10): rol e identificador opaco del actor, acción, recurso y un detalle estructurado. La aplicación no puede corregirla ni borrarla.",
+        "forma": "tabla del catálogo",
+        "nombre": "bitacora",
+        "procedencia": "apps/api/migrations/versions/0003_la_base_y_la_cola.py:84"
+      },
+      {
+        "alcance": "de agencia",
+        "categoria": "plataforma",
+        "contenido": "Registro del negocio cliente dentro de una agencia: nombre, sector declarado con su fecha de verificación, y la marca de alta de desarrollo. No contiene datos de ninguna persona.",
+        "forma": "tabla del catálogo",
+        "nombre": "clientes",
+        "procedencia": "apps/api/migrations/versions/0001_cimiento_del_inquilino.py:69"
+      },
+      {
+        "alcance": "de cliente",
+        "categoria": "plataforma",
+        "contenido": "Configuración de un agente de un cliente: nombre y fecha de alta. No contiene datos de ninguna persona.",
+        "forma": "tabla del catálogo",
+        "nombre": "heraldos",
+        "procedencia": "apps/api/migrations/versions/0001_cimiento_del_inquilino.py:78"
+      },
+      {
+        "alcance": "de cliente",
+        "categoria": "conversación",
+        "contenido": "Constancia de idempotencia de la entrada (RF-12): canal, identificador externo del mensaje tal como lo emite la plataforma de mensajería, el trabajo que produjo y el momento de recepción. No guarda el texto del mensaje.",
+        "forma": "tabla del catálogo",
+        "nombre": "mensajes_entrantes",
+        "procedencia": "apps/api/migrations/versions/0003_la_base_y_la_cola.py:191"
+      },
+      {
+        "alcance": "de cliente",
+        "categoria": "credencial cifrada",
+        "contenido": "Credenciales del inquilino guardadas cifradas (columna binaria); no existe ninguna columna con el valor en claro y no se devuelven en claro por ninguna vía (RF-09).",
+        "forma": "tabla del catálogo",
+        "nombre": "secretos",
+        "procedencia": "apps/api/migrations/versions/0003_la_base_y_la_cola.py:62"
+      },
+      {
+        "alcance": "de cliente",
+        "categoria": "cola",
+        "contenido": "Trabajos pendientes o en curso del inquilino, con su estado, su número de intentos y el momento en que vuelven a estar disponibles. Su carga útil es la del trabajo encolado.",
+        "forma": "tabla del catálogo",
+        "nombre": "trabajos",
+        "procedencia": "apps/api/migrations/versions/0003_la_base_y_la_cola.py:114"
+      },
+      {
+        "alcance": "de cliente",
+        "categoria": "cola",
+        "contenido": "Copia de los trabajos ya terminados, para consulta y purga por antigüedad. Se inserta, se consulta y se purga: no se puede reescribir.",
+        "forma": "tabla del catálogo",
+        "nombre": "trabajos_archivados",
+        "procedencia": "apps/api/migrations/versions/0003_la_base_y_la_cola.py:152"
+      },
+      {
+        "alcance": "de cliente",
+        "categoria": "derivado",
+        "contenido": "Marca de que un mensaje entrante ya se recibió. La clave lleva la agencia, el cliente, el canal y el identificador externo del mensaje; no guarda ningún contenido del mensaje.",
+        "forma": "clave de Redis",
+        "nombre": "heraldo:idem:*",
+        "procedencia": "apps/api/app/channels/idempotency.py:clave_de"
+      },
+      {
+        "alcance": "de agencia",
+        "categoria": "plataforma",
+        "contenido": "Sesión abierta de una persona operadora: agencia, cliente y rol, más la huella del secreto de la sesión. El secreto no se guarda.",
+        "forma": "clave de Redis",
+        "nombre": "heraldo:sesion:*",
+        "procedencia": "apps/api/app/tenancy/auth.py:AlmacenDeSesiones.clave"
+      },
+      {
+        "alcance": "de cliente",
+        "categoria": "derivado",
+        "contenido": "Contador de un límite por ventana. La clave lleva el nombre del límite y una huella irreversible del par (inquilino, dirección de red del remitente): la dirección no se guarda.",
+        "forma": "clave de Redis",
+        "nombre": "heraldo:limite:*",
+        "procedencia": "apps/api/app/tenancy/limits.py:LimitadorCompartido.clave"
+      }
+    ],
+    "destinatarios": [
+      {
+        "destinatario": "proveedor de modelo: anthropic",
+        "funcion": "validar contra el proveedor la credencial que registra el cliente, antes de guardarla (RF-18). Es una consulta a su catálogo de modelos: no envía ningún contenido del inquilino",
+        "mecanismo": "petición HTTPS saliente por el punto único de salida (`egress.red.pedir`): solo `https` al 443, con el destino revalidado contra direcciones internas antes de conectar y en cada redirección",
+        "procedencia": "apps/api/app/agents/providers.py:LISTA_DECLARADA (sin ficha verificada: no se afirma ninguna región)",
+        "ubicacion": "pendiente (T-100·bis): su ficha de condiciones no está verificada ni fechada, y sin ficha no se registra ninguna credencial"
+      },
+      {
+        "destinatario": "proveedor de modelo: openai",
+        "funcion": "validar contra el proveedor la credencial que registra el cliente, antes de guardarla (RF-18). Es una consulta a su catálogo de modelos: no envía ningún contenido del inquilino",
+        "mecanismo": "petición HTTPS saliente por el punto único de salida (`egress.red.pedir`): solo `https` al 443, con el destino revalidado contra direcciones internas antes de conectar y en cada redirección",
+        "procedencia": "apps/api/app/agents/providers.py:LISTA_DECLARADA (sin ficha verificada: no se afirma ninguna región)",
+        "ubicacion": "pendiente (T-100·bis): su ficha de condiciones no está verificada ni fechada, y sin ficha no se registra ninguna credencial"
+      },
+      {
+        "destinatario": "plataforma de mensajería",
+        "funcion": "entregar y recibir los mensajes del usuario final",
+        "mecanismo": "pendiente (T-119): hoy `packages/egress/` no tiene ningún módulo de salida de mensajes, así que ningún mensaje sale de esta plataforma",
+        "procedencia": "packages/egress/ (medido: solo existe el punto de salida de red)",
+        "ubicacion": "pendiente (T-107/T-119)"
+      },
+      {
+        "destinatario": "borde de la agencia (publicación y red de entrega)",
+        "funcion": "servir las superficies públicas y proteger su entrada",
+        "mecanismo": "no versionado aquí: es infraestructura de la agencia, descrita en la especificación §7. Este inventario no lo puede derivar y lo declara como límite en vez de afirmarlo",
+        "procedencia": "límite declarado del inventario (no derivable del repositorio)",
+        "ubicacion": "fuera de este repositorio"
+      },
+      {
+        "destinatario": "respaldos",
+        "funcion": "conservar copias de seguridad de la base",
+        "mecanismo": "pendiente (T-213·bis)",
+        "procedencia": "deploy/retencion_respaldos.toml no existe (comprobado en el árbol)",
+        "ubicacion": "pendiente (T-213·bis)"
+      },
+      {
+        "destinatario": "avisos internos del negocio cliente",
+        "funcion": "avisar al negocio por el canal que él declare",
+        "mecanismo": "pendiente (T-118)",
+        "procedencia": "apps/api/app/channels/destinos_internos.py no existe (comprobado en el árbol)",
+        "ubicacion": "pendiente (T-118)"
+      },
+      {
+        "destinatario": "buzón de privacidad y de borrado",
+        "funcion": "recibir y resolver las peticiones de las personas",
+        "mecanismo": "pendiente (T-030)",
+        "procedencia": "apps/api/app/legal/buzon.py no existe (comprobado en el árbol)",
+        "ubicacion": "pendiente (T-030)"
+      },
+      {
+        "destinatario": "puntos del código que llaman al punto único de salida",
+        "funcion": "es la lista derivada de quién puede mandar algo fuera: `apps/api/app/agents/providers.py`",
+        "mecanismo": "petición HTTPS saliente por el punto único de salida (`egress.red.pedir`): solo `https` al 443, con el destino revalidado contra direcciones internas antes de conectar y en cada redirección",
+        "procedencia": "barrido de `apps/` y `packages/` (llamadas a `egress.red.pedir`)",
+        "ubicacion": "no aplica"
+      }
+    ],
+    "identidades": [
+      {
+        "contenido": "personal de la agencia que opera la plataforma; queda fuera de la vía de borrado del usuario final (política interna de la agencia)",
+        "estado": "pendiente (T-101)",
+        "identidad": "usuarios_agencia",
+        "procedencia": "catálogo vivo (pg_class): la tabla no existe"
+      },
+      {
+        "contenido": "personas del negocio cliente: usuarios del portal y la identidad de plataforma del administrador que conecta el canal",
+        "estado": "pendiente (T-212·sexies)",
+        "identidad": "usuarios_cliente",
+        "procedencia": "catálogo vivo (pg_class): la tabla no existe"
+      },
+      {
+        "contenido": "el «quién» de la bitácora se registra como rol más identificador opaco, nunca nombre ni correo (RF-10)",
+        "estado": "en el catálogo",
+        "identidad": "actor de la bitácora",
+        "procedencia": "apps/api/migrations/versions/0003_la_base_y_la_cola.py"
+      }
+    ],
+    "licencias": [
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "MIT",
+        "paquete": "alembic",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "1.19.1"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "MIT",
+        "paquete": "annotated-doc",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "0.0.5"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "MIT",
+        "paquete": "annotated-types",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "0.8.0"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "MIT",
+        "paquete": "anyio",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "4.14.2"
+      },
+      {
+        "fuente": "metadatos instalados (License)",
+        "licencia": "MPL-2.0",
+        "paquete": "certifi",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "2026.7.22"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "MIT-0",
+        "paquete": "cffi",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "2.1.1"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "BSD-3-Clause",
+        "paquete": "click",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "8.5.0"
+      },
+      {
+        "fuente": "declarada (Classifier): solo se instala en Windows (`sys_platform == 'win32'` en uv.lock)",
+        "licencia": "BSD License",
+        "paquete": "colorama",
+        "procedencia": "scripts/inventario_legal.py:LICENCIAS_DE_PAQUETES_CONDICIONADOS",
+        "version": "0.4.6"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "Apache-2.0 OR BSD-3-Clause",
+        "paquete": "cryptography",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "50.0.1"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "MIT",
+        "paquete": "fastapi",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "0.141.1"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "MIT AND PSF-2.0",
+        "paquete": "greenlet",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "3.5.5"
+      },
+      {
+        "fuente": "metadatos instalados (License)",
+        "licencia": "MIT",
+        "paquete": "h11",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "0.16.0"
+      },
+      {
+        "fuente": "miembro del espacio de trabajo",
+        "licencia": "propia: ver `LICENSE` en la raíz del repositorio",
+        "paquete": "heraldo",
+        "procedencia": "uv.lock:[[package]] (source editable)",
+        "version": "0.0.0"
+      },
+      {
+        "fuente": "miembro del espacio de trabajo",
+        "licencia": "propia: ver `LICENSE` en la raíz del repositorio",
+        "paquete": "heraldo-api",
+        "procedencia": "uv.lock:[[package]] (source editable)",
+        "version": "0.0.0"
+      },
+      {
+        "fuente": "miembro del espacio de trabajo",
+        "licencia": "propia: ver `LICENSE` en la raíz del repositorio",
+        "paquete": "heraldo-egress",
+        "procedencia": "uv.lock:[[package]] (source editable)",
+        "version": "0.0.0"
+      },
+      {
+        "fuente": "miembro del espacio de trabajo",
+        "licencia": "propia: ver `LICENSE` en la raíz del repositorio",
+        "paquete": "heraldo-worker",
+        "procedencia": "uv.lock:[[package]] (source editable)",
+        "version": "0.0.0"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "BSD-3-Clause",
+        "paquete": "httpcore",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "1.0.9"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "MIT",
+        "paquete": "httptools",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "0.8.0"
+      },
+      {
+        "fuente": "metadatos instalados (License)",
+        "licencia": "BSD-3-Clause",
+        "paquete": "httpx",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "0.28.1"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "BSD-3-Clause",
+        "paquete": "idna",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "3.19"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "MIT",
+        "paquete": "iniconfig",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "2.3.0"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "MIT",
+        "paquete": "mako",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "1.4.1"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "BSD-3-Clause",
+        "paquete": "markupsafe",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "3.0.3"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "Apache-2.0 OR BSD-2-Clause",
+        "paquete": "packaging",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "26.3"
+      },
+      {
+        "fuente": "metadatos instalados (License)",
+        "licencia": "MIT",
+        "paquete": "pluggy",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "1.6.0"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "LGPL-3.0-only",
+        "paquete": "psycopg",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "3.3.4"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "LGPL-3.0-only",
+        "paquete": "psycopg-binary",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "3.3.4"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "BSD-3-Clause",
+        "paquete": "pycparser",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "3.0"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "MIT",
+        "paquete": "pydantic",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "2.13.4"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "MIT",
+        "paquete": "pydantic-core",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "2.46.4"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "BSD-2-Clause",
+        "paquete": "pygments",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "2.21.0"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "MIT",
+        "paquete": "pytest",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "9.1.1"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "Apache-2.0",
+        "paquete": "pytest-asyncio",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "1.4.0"
+      },
+      {
+        "fuente": "metadatos instalados (License)",
+        "licencia": "BSD-3-Clause",
+        "paquete": "python-dotenv",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "1.2.3"
+      },
+      {
+        "fuente": "metadatos instalados (License)",
+        "licencia": "MIT",
+        "paquete": "pyyaml",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "6.0.3"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "MIT",
+        "paquete": "redis",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "8.1.0"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "MIT",
+        "paquete": "ruff",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "0.16.4"
+      },
+      {
+        "fuente": "metadatos instalados (License)",
+        "licencia": "MIT",
+        "paquete": "sqlalchemy",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "2.0.52"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "BSD-3-Clause",
+        "paquete": "starlette",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "1.6.0"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "PSF-2.0",
+        "paquete": "typing-extensions",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "4.16.0"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "MIT",
+        "paquete": "typing-inspection",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "0.4.4"
+      },
+      {
+        "fuente": "declarada (License): solo se instala en Windows (`sys_platform == 'win32'` en uv.lock)",
+        "licencia": "Apache-2.0",
+        "paquete": "tzdata",
+        "procedencia": "scripts/inventario_legal.py:LICENCIAS_DE_PAQUETES_CONDICIONADOS",
+        "version": "2026.3"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "BSD-3-Clause",
+        "paquete": "uvicorn",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "0.52.4"
+      },
+      {
+        "fuente": "declarada (License): no se instala en Windows (`sys_platform != 'win32'` en uv.lock)",
+        "licencia": "MIT License",
+        "paquete": "uvloop",
+        "procedencia": "scripts/inventario_legal.py:LICENCIAS_DE_PAQUETES_CONDICIONADOS",
+        "version": "0.22.1"
+      },
+      {
+        "fuente": "metadatos instalados (License)",
+        "licencia": "MIT",
+        "paquete": "watchfiles",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "1.2.0"
+      },
+      {
+        "fuente": "metadatos instalados (License-Expression)",
+        "licencia": "BSD-3-Clause",
+        "paquete": "websockets",
+        "procedencia": "uv.lock:[[package]] + importlib.metadata",
+        "version": "17.1"
+      }
+    ],
+    "retencion": [
+      {
+        "categoria": "cola",
+        "inicio": "desde que el trabajo termina; después pasa al archivo",
+        "plazo": "1 día",
+        "procedencia": "apps/worker/cola.py:RETENCION_EN_CALIENTE"
+      },
+      {
+        "categoria": "cola",
+        "inicio": "desde que el trabajo se archiva; después se purga",
+        "plazo": "30 días",
+        "procedencia": "apps/worker/cola.py:RETENCION_EN_ARCHIVO"
+      },
+      {
+        "categoria": "derivado",
+        "inicio": "desde que se recibe el mensaje (marca de idempotencia en Redis)",
+        "plazo": "7 días",
+        "procedencia": "apps/api/app/channels/idempotency.py:VIGENCIA"
+      },
+      {
+        "categoria": "plataforma",
+        "inicio": "desde que se abre la sesión. Es un techo absoluto: no se renueva por usarla",
+        "plazo": "8 horas",
+        "procedencia": "apps/api/app/tenancy/auth.py:TTL_SESION_SEGUNDOS"
+      },
+      {
+        "categoria": "derivado",
+        "inicio": "desde la primera petición de la ventana. Hoy ningún módulo declara un límite: la clase existe y nadie la instancia todavía",
+        "plazo": "la ventana que declare cada límite en su punto de uso",
+        "procedencia": "apps/api/app/tenancy/limits.py:Limite.ventana_segundos"
+      },
+      {
+        "categoria": "bitácora",
+        "inicio": "no se borra por tiempo: es de solo inserción por diseño y la aplicación no la puede reescribir. El residuo seudónimo del borrado de una persona (RF-49·bis) todavía no está construido: pendiente (T-212·ter)",
+        "plazo": "fuera de la retención por antigüedad (RF-10)",
+        "procedencia": "apps/api/app/tenancy/rol.py:PRIVILEGIOS_DE_APLICACION"
+      },
+      {
+        "categoria": "identificación",
+        "inicio": "pendiente (T-213·bis)",
+        "plazo": "pendiente (T-213·bis)",
+        "procedencia": "apps/api/app/tenancy/retention.py no existe (comprobado en el árbol)"
+      },
+      {
+        "categoria": "conversación",
+        "inicio": "pendiente (T-213·bis)",
+        "plazo": "pendiente (T-213·bis)",
+        "procedencia": "apps/api/app/tenancy/retention.py no existe (comprobado en el árbol)"
+      },
+      {
+        "categoria": "consentimiento",
+        "inicio": "pendiente (T-213·bis)",
+        "plazo": "pendiente (T-213·bis)",
+        "procedencia": "apps/api/app/tenancy/retention.py no existe (comprobado en el árbol)"
+      },
+      {
+        "categoria": "conocimiento del negocio",
+        "inicio": "pendiente (T-213·bis)",
+        "plazo": "pendiente (T-213·bis)",
+        "procedencia": "apps/api/app/tenancy/retention.py no existe (comprobado en el árbol)"
+      },
+      {
+        "categoria": "uso",
+        "inicio": "pendiente (T-213·bis)",
+        "plazo": "pendiente (T-213·bis)",
+        "procedencia": "apps/api/app/tenancy/retention.py no existe (comprobado en el árbol)"
+      },
+      {
+        "categoria": "respaldos",
+        "inicio": "pendiente (T-213·bis)",
+        "plazo": "pendiente (T-213·bis)",
+        "procedencia": "deploy/retencion_respaldos.toml no existe (comprobado en el árbol)"
+      }
+    ],
+    "superficies": [
+      {
+        "almacenamiento": "no sirve ninguna página propia. Las páginas de documentación de interfaz, cuando la decisión de entorno las expone, cargan su guion de un CDN de terceros declarado en `superficie_publica`; su almacenamiento lo decide ese guion y no se puede medir desde el servidor",
+        "cookies": "ninguna: no emite `Set-Cookie` en ninguna de sus rutas",
+        "estado": "construida",
+        "procedencia": "medido sobre 6 pares (método, ruta) de `app.main.crear_aplicacion`",
+        "superficie": "interfaz de programación (HTTP)"
+      },
+      {
+        "almacenamiento": "pendiente (T-101)",
+        "cookies": "pendiente (T-101)",
+        "estado": "no construida (T-101)",
+        "procedencia": "apps/web/ solo contiene su marcador de posición",
+        "superficie": "panel de la agencia"
+      },
+      {
+        "almacenamiento": "pendiente (T-200)",
+        "cookies": "pendiente (T-200)",
+        "estado": "no construida (T-200)",
+        "procedencia": "apps/web/ solo contiene su marcador de posición",
+        "superficie": "portal del cliente"
+      },
+      {
+        "almacenamiento": "pendiente (T-400)",
+        "cookies": "pendiente (T-400)",
+        "estado": "no construida (T-400)",
+        "procedencia": "apps/web/ solo contiene su marcador de posición",
+        "superficie": "widget"
+      }
+    ]
+  },
+  "generado_por": "scripts/inventario_legal.py",
+  "limites": [
+    "El borde de la agencia que publica las superficies no vive en este repositorio: no se deriva y se declara como límite.",
+    "El almacenamiento del navegador (cookies propias, `localStorage`) solo se puede medir cuando exista una superficie de navegador; hoy no hay ninguna.",
+    "Este inventario no dice quién es responsable, encargado ni subencargado de nada: eso lo decide T-030·ter con estos hechos delante.",
+    "La licencia de un paquete que solo se instala en un sistema operativo se declara en el guion y se cruza contra los metadatos en el entorno que sí lo instala.",
+    "Los datos que no son tabla se descubren por las constantes de prefijo del código, y el generador se niega a escribir si alguna no tiene fila. Ese descubrimiento reconoce las constantes por su nombre: una familia de claves que no lo siguiera quedaría fuera, y por eso el nombre es convención del repositorio y no criterio de quien la escribe."
+  ],
+  "medicion_de_rutas": [
+    {
+      "codigo": 503,
+      "cookies": [],
+      "metodo": "DELETE",
+      "procedencia": "medido sobre `app.main.crear_aplicacion` por su interfaz ASGI",
+      "ruta": "/clientes/{cliente_id}"
+    },
+    {
+      "codigo": 200,
+      "cookies": [],
+      "metodo": "GET",
+      "procedencia": "medido sobre `app.main.crear_aplicacion` por su interfaz ASGI",
+      "ruta": "/docs"
+    },
+    {
+      "codigo": 200,
+      "cookies": [],
+      "metodo": "GET",
+      "procedencia": "medido sobre `app.main.crear_aplicacion` por su interfaz ASGI",
+      "ruta": "/openapi.json"
+    },
+    {
+      "codigo": 200,
+      "cookies": [],
+      "metodo": "GET",
+      "procedencia": "medido sobre `app.main.crear_aplicacion` por su interfaz ASGI",
+      "ruta": "/redoc"
+    },
+    {
+      "codigo": 503,
+      "cookies": [],
+      "metodo": "GET",
+      "procedencia": "medido sobre `app.main.crear_aplicacion` por su interfaz ASGI",
+      "ruta": "/salud/disponibilidad"
+    },
+    {
+      "codigo": 200,
+      "cookies": [],
+      "metodo": "GET",
+      "procedencia": "medido sobre `app.main.crear_aplicacion` por su interfaz ASGI",
+      "ruta": "/salud/vivacidad"
+    }
+  ],
+  "no_decide": [
+    "quién es responsable, encargado o subencargado (T-030·ter)",
+    "qué promete el texto público (T-030·quater)"
+  ],
+  "version_del_formato": 1
+}

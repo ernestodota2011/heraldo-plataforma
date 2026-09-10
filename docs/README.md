@@ -10,6 +10,13 @@
 |---|---|
 | [`heraldo-problemas.md`](heraldo-problemas.md) | Registro rodante de problemas: síntoma → causa raíz → solución → prevención. Es el insumo del lazo de ajuste (T-116) |
 | [`plantilla-registro.md`](plantilla-registro.md) | El bloque que se copia para abrir una entrada, los tres estados de curaduría y un ejemplo |
+| [`legal/inventario.md`](legal/inventario.md) | **Generado**, no escrito: los inventarios que alimentan el piso legal —datos, destinatarios, cookies por superficie, licencias, retención vigente e identidades—, derivados del código por [`scripts/inventario_legal.py`](../scripts/inventario_legal.py) |
+| [`legal/inventario.json`](legal/inventario.json) | El mismo inventario, para que el texto público lo lea en vez de repetirlo a mano |
+
+> **`docs/legal/` no se edita a mano.** Lo escribe el generador, y
+> `apps/api/tests/test_inventario_legal.py` se pone **roja** si lo comprometido
+> deja de ser lo que el código deriva hoy (RF-31). Se regenera con
+> `uv run --no-sync python scripts/inventario_legal.py`.
 
 ## Qué vive fuera de aquí, y por qué
 

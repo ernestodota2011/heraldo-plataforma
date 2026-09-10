@@ -181,6 +181,25 @@ jobs:
           apps/api/tests/test_prompt.py
           apps/api/tests/test_inyeccion.py
           apps/api/tests/test_proveedores.py
+          apps/api/tests/test_inventario_legal.py
 
       - name: Suite
         run: uv run --no-sync pytest
+
+      # T-030-bis / RF-31 — lo que el piso legal publica tiene que ser lo que el
+      # codigo HACE. `scripts/inventario_legal.py` deriva el inventario del
+      # catalogo vivo, del codigo y de `uv.lock`, y `--verificar` sale en ROJO si
+      # lo comprometido en `docs/legal/` ya no es eso. Nacio de P-51: la v1 del
+      # piso legal afirmo como hechos ocho cosas que nada sostenia, y ningun gate
+      # del proyecto lo veia.
+      #
+      # WHY (la migracion se corre AQUI y no se hereda de `pytest`): el bloque de
+      # datos se deriva del CATALOGO VIVO, asi que este paso necesita el esquema
+      # migrado. Darlo por hecho porque «la suite ya lo dejo migrado» seria una
+      # dependencia implicita del orden de los pasos — la clase de acoplamiento
+      # que se rompe el dia que alguien mueve un paso, y sin avisar. `upgrade
+      # head` sobre un esquema que ya esta en head no hace nada.
+      - name: Inventario legal
+        run: |
+          uv run --no-sync alembic -c apps/api/migrations/alembic.ini upgrade head
+          uv run --no-sync python scripts/inventario_legal.py --verificar
