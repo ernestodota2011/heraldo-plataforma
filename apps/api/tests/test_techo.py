@@ -1021,3 +1021,92 @@ def test_el_archivo_de_precios_dice_si_esta_verificado() -> None:
             "procedencia tiene que viajar con cada fila hasta la base, no quedarse "
             "en un campo que nadie consulta"
         )
+
+
+def test_un_cargue_con_una_llave_repetida_no_destruye_el_catalogo(motor_admin) -> None:
+    """El `UNIQUE` de la tabla tambien lo rechaza — pero DESPUES del borrado.
+
+    # WHY: el cargador corre en AUTOCOMMIT, asi que cuando la base levantara por
+    # la clave repetida el `DELETE` ya estaria confirmado y el catalogo vigente
+    # perdido. Es la misma leccion que la sonda de arriba en la variante que el
+    # guard no cubria: uno que solo ve algunas formas de su propio error deja de
+    # proteger el dia que llega la otra.
+    """
+    _cargar(motor_admin, _TARIFA)
+    repetida = {
+        "pais": "US", "tipo": "utilidad",
+        "precio_usd": "0.0140", "vigente_desde": "2025-07-01",
+    }
+
+    with pytest.raises(ValueError, match="dos veces"):
+        _cargar(motor_admin, (repetida, dict(repetida)))
+
+    with motor_admin.connect() as conexion:
+        cuantas = conexion.execute(text("SELECT count(*) FROM precios_por_pais")).scalar_one()
+    assert cuantas == len(_TARIFA), (
+        f"quedan {cuantas} filas de {len(_TARIFA)}: una llave repetida en el archivo "
+        "se llevo por delante el catalogo vigente"
+    )
+
+
+@pytest.mark.parametrize("monto", [0.5, 1.0])
+async def test_un_monto_en_coma_flotante_se_rechaza(motor, motor_admin, monto) -> None:
+    """Ruta de dinero: un tipo que no representa exacto no entra «con cuidado».
+
+    `Decimal(0.1)` es 0.1000000000000000055511151231257827: aceptar el `float` y
+    convertirlo aqui esconderia el error de redondeo dentro de la suma del mes,
+    donde ya no lo ve nadie. El caso `1.0` esta a proposito: un float que parece
+    exacto es el que se cuela.
+    """
+    _fijar_techo(motor_admin, CLIENTE_A1, Decimal("10"), Decimal("0.99"))
+    inquilino = sesion_de_cliente(AGENCIA_A, CLIENTE_A1)
+    async with sesion_de_inquilino(motor, inquilino) as conexion:
+        with pytest.raises(MontoNoAdmitido, match="float"):
+            await registrar_consumo(
+                conexion,
+                inquilino,
+                concepto=CONCEPTO_MODELO,
+                monto_usd=monto,
+                detalle={},
+                ahora=MOMENTO,
+            )
+
+    # CONTROL: el mismo importe como `Decimal` SI pasa. Sin esto, un rechazo
+    # indiscriminado de todo monto pasaria la asercion de arriba.
+    resultado = await _consumir(motor, inquilino, Decimal(str(monto)))
+    assert resultado.gastado_usd == Decimal(str(monto))
+
+
+async def test_un_secreto_dentro_del_detalle_aborta_el_registro(motor, motor_admin) -> None:
+    """RF-09 no se puede romper por la puerta de RF-16.
+
+    `consumos` es de SOLO INSERCION, asi que un secreto escrito ahi no se puede
+    corregir despues: es la misma razon por la que la bitacora barre su detalle.
+    Se mide con material CIFRADO —lo que el barrido rechaza por tipo— porque es
+    lo que de verdad acabaria dentro de un «guardo la respuesta entera por si
+    acaso».
+    """
+    from app.tenancy.secrets import SecretoEnLaRespuesta
+
+    _fijar_techo(motor_admin, CLIENTE_A1, Decimal("10"), Decimal("0.99"))
+    inquilino = sesion_de_cliente(AGENCIA_A, CLIENTE_A1)
+
+    async with sesion_de_inquilino(motor, inquilino) as conexion:
+        with pytest.raises(SecretoEnLaRespuesta):
+            await registrar_consumo(
+                conexion,
+                inquilino,
+                concepto=CONCEPTO_MODELO,
+                monto_usd=Decimal("1"),
+                detalle={"respuesta": {"credencial": b"\x00material-cifrado"}},
+                ahora=MOMENTO,
+            )
+
+    with motor_admin.connect() as conexion:
+        cuantas = conexion.execute(text("SELECT count(*) FROM consumos")).scalar_one()
+    assert cuantas == 0, "el consumo se registro con el secreto dentro del detalle"
+
+    # CONTROL: un detalle normal SI se registra. Sin esto, un barrido que
+    # rechazara todo pasaria la asercion de arriba sin medir nada.
+    resultado = await _consumir(motor, inquilino, Decimal("1"))
+    assert resultado.gastado_usd == Decimal("1")

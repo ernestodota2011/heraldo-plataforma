@@ -66,6 +66,7 @@ from sqlalchemy import text
 from app.agents.providers import Titular
 from app.audit.bitacora import apuntar
 from app.tenancy.inquilino import CENTINELA_SIN_CLIENTE, Alcance, Inquilino
+from app.tenancy.secrets import barrer
 
 RAIZ = Path(__file__).resolve().parents[4]
 
@@ -307,6 +308,12 @@ _GASTO_DE_LA_AGENCIA = text(
     "  AND registrado_en >= :desde AND registrado_en < :hasta"
 )
 
+#: ==WHY (el `detalle` pasa por el barrido de secretos, igual que el de la
+#: bitacora): `consumos` es de SOLO INSERCION.== Lo mas facil del mundo es meter
+#: «por si acaso» la respuesta entera del proveedor dentro del detalle de un
+#: consumo, y entonces RF-09 se rompe por la puerta de RF-16 — en una tabla que
+#: ademas nadie puede corregir despues. El barrido rechaza por TIPO (material
+#: cifrado, secretos descifrados) y aborta la escritura antes de que ocurra.
 _REGISTRAR = text(
     "INSERT INTO consumos (agencia_id, cliente_id, heraldo_id, titular, concepto, "
     "                      monto_usd, detalle, registrado_en) "
@@ -428,7 +435,7 @@ async def registrar_consumo(
                 "titular": titular.value,
                 "concepto": concepto,
                 "monto_usd": monto,
-                "detalle": json.dumps(dict(detalle), default=str, ensure_ascii=False),
+                "detalle": json.dumps(barrer(dict(detalle)), default=str, ensure_ascii=False),
                 "registrado_en": momento,
             },
         )
@@ -649,6 +656,7 @@ def cargar_precios(
             "rama del no de RF-16 se quedaria sin respaldo"
         )
     validadas = [_entrada_valida(entrada) for entrada in entradas]
+    _sin_llaves_repetidas(validadas)
 
     conexion.execute(_VACIAR_PRECIOS)
     for entrada in validadas:
@@ -687,6 +695,19 @@ def leer_archivo_de_precios(ruta: Path) -> ArchivoDePrecios:
 # Piezas internas
 # ==========================================================================
 def _monto_valido(monto: Decimal) -> Decimal:
+    # ==WHY (un `float` se RECHAZA, no se convierte): `Decimal(0.1)` es
+    # 0.1000000000000000055511151231257827..., y `Decimal(str(0.1))` esconde el
+    # problema en vez de resolverlo.== En una ruta de dinero, un tipo que no
+    # representa exactamente lo que dice no se acepta «con cuidado»: se rechaza
+    # en el borde, que es donde todavia se puede corregir. Dentro de la suma del
+    # mes el error de redondeo ya no lo ve nadie.
+    if isinstance(monto, float):
+        raise MontoNoAdmitido(
+            f"monto {monto!r} es un float: en una ruta de dinero no se admite un tipo "
+            "que no representa exactamente el valor que dice. Pasa `Decimal` (o un "
+            "entero); convertirlo aqui esconderia el error de redondeo en vez de "
+            "impedirlo"
+        )
     valor = Decimal(monto)
     if valor <= 0:
         raise MontoNoAdmitido(
@@ -890,6 +911,29 @@ async def _precio_mas_alto(conexion, pais: str, tipo: str) -> Precio:
         fuente=fila.fuente,
         es_respaldo=True,
     )
+
+
+def _sin_llaves_repetidas(validadas: list[dict[str, Any]]) -> None:
+    """Dos filas con la misma llave no son dos precios: son una contradiccion.
+
+    # ==WHY (se caza AQUI y no en el `UNIQUE` de la tabla): la restriccion de la
+    # base tambien lo rechaza, pero lo rechaza DESPUES del `DELETE`== — y el
+    # cargador corre con la conexion en AUTOCOMMIT, asi que ese borrado ya esta
+    # confirmado. El catalogo se quedaria vacio o a medias por un archivo con una
+    # linea repetida, que es exactamente lo que la validacion previa existe para
+    # impedir. Un guard que cubre solo algunas variantes de su propio error deja
+    # de proteger el dia que llega la otra.
+    """
+    vistas: set[tuple[str, str, date]] = set()
+    for entrada in validadas:
+        llave = (entrada["pais"], entrada["tipo"], entrada["vigente_desde"])
+        if llave in vistas:
+            raise ValueError(
+                f"la llave {llave} aparece dos veces en el catalogo: dos precios para "
+                "el mismo pais, tipo y fecha de vigencia no son un catalogo, son una "
+                "contradiccion — y cual gana lo decidiria el orden de las filas"
+            )
+        vistas.add(llave)
 
 
 def _entrada_valida(entrada: Mapping[str, Any]) -> dict[str, Any]:
