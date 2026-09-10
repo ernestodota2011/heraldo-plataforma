@@ -39,6 +39,9 @@ from app.tenancy import Alcance, AlcanceInvalido, Inquilino, sesion_de_inquilino
 from app.tenancy.inquilino import CENTINELA_SIN_CLIENTE
 from app.tenancy.politicas import COLUMNA_AGENCIA, valida_identificador
 from conftest import (
+    ACEPTACION_A1,
+    ACEPTACION_A2,
+    ACEPTACION_B1,
     AGENCIA_A,
     AGENCIA_B,
     APUNTE_A1,
@@ -59,9 +62,13 @@ from conftest import (
     SECRETO_A1,
     SECRETO_A2,
     SECRETO_B1,
+    SUSPENSION_A1,
+    SUSPENSION_A2,
+    SUSPENSION_B1,
     TRABAJO_A1,
     TRABAJO_A2,
     TRABAJO_B1,
+    VERSION_ANEXO_DESARROLLO,
     resembrar,
     sesion_de_agencia,
     sesion_de_cliente,
@@ -664,6 +671,23 @@ RECURSOS_DE_CLIENTE: tuple[RecursoDeCliente, ...] = (
         puede_actualizar=False,
         fila_nueva=UUID("aaaaaaaa-0000-4000-8000-000000009090"),
     ),
+    RecursoDeCliente(
+        "suspensiones",
+        {"mio": SUSPENSION_A1, "vecino": SUSPENSION_A2, "ajeno": SUSPENSION_B1},
+        # RF-66: SI se actualiza — levantar una suspension es cerrar su fila. Lo
+        # que no se concede es `DELETE`: un corte que se puede hacer desaparecer no
+        # deja constancia de haber existido.
+        puede_actualizar=True,
+        fila_nueva=UUID("aaaaaaaa-0000-4000-8000-000000007070"),
+    ),
+    RecursoDeCliente(
+        "aceptaciones_contractuales",
+        {"mio": ACEPTACION_A1, "vecino": ACEPTACION_A2, "ajeno": ACEPTACION_B1},
+        # RF-66: una aceptacion es un hecho fechado. Reescribirla cambiaria QUE
+        # acepto el cliente y CUANDO.
+        puede_actualizar=False,
+        fila_nueva=UUID("aaaaaaaa-0000-4000-8000-000000008080"),
+    ),
 )
 
 POR_TABLA: dict[str, RecursoDeCliente] = {r.tabla: r for r in RECURSOS_DE_CLIENTE}
@@ -747,6 +771,14 @@ NO_APLICA: dict[str, dict[tuple[str, str], str]] = {
 
 #: Tablas del catalogo que NO tienen matriz propia, con su motivo ESCRITO.
 SIN_MATRIZ_PROPIA: dict[str, str] = {
+    "versiones_publicadas": (
+        "Catalogo de plataforma (RF-66): sus filas no pertenecen a ningun inquilino "
+        "—una version del contrato es la misma para todos— asi que las relaciones "
+        "`mio`, `vecino` y `ajeno` no son expresables sobre ella y no hay ningun "
+        "acceso cruzado que medir. Lo que SI la gobierna es el privilegio, y eso lo "
+        "mide `test_un_catalogo_de_plataforma_solo_concede_lo_que_declara` en "
+        "`test_rls_cobertura.py`, con igualdad exacta contra lo declarado"
+    ),
     "alembic_version": (
         "Catalogo de migraciones de Alembic: no contiene ningun dato de inquilino y "
         "el rol de aplicacion no tiene NINGUN privilegio sobre ella, cosa que "
@@ -859,6 +891,43 @@ _SQL = {
     ("mensajes_entrantes", "movimiento"): text(
         "UPDATE mensajes_entrantes SET agencia_id = :a, cliente_id = :c WHERE id = :objetivo"
     ),
+    # --- las dos tablas de inquilino de la revision 0010 (RF-66) ---
+    ("suspensiones", "lectura"): text("SELECT count(*) FROM suspensiones WHERE id = :objetivo"),
+    # WHY (la fila de sonda nace LEVANTADA): el indice unico parcial solo admite
+    # UNA suspension vigente por cliente, y la siembra ya dejo una cerrada. Si esta
+    # insercion naciera vigente, la sonda de `insercion` mediria la unicidad en vez
+    # del aislamiento — el mismo cuidado que `secretos` toma con su clave unica.
+    ("suspensiones", "insercion"): text(
+        "INSERT INTO suspensiones (id, agencia_id, cliente_id, motivo, suspendida_por, "
+        "       levantada_en, levantada_por) "
+        "VALUES (:nuevo, :a, :c, 'sonda', 'operador_agencia:0000000000000000', "
+        "        now(), 'operador_agencia:0000000000000000')"
+    ),
+    ("suspensiones", "actualizacion"): text(
+        "UPDATE suspensiones SET motivo = 'sonda' WHERE id = :objetivo"
+    ),
+    ("suspensiones", "movimiento"): text(
+        "UPDATE suspensiones SET agencia_id = :a, cliente_id = :c WHERE id = :objetivo"
+    ),
+    ("aceptaciones_contractuales", "lectura"): text(
+        "SELECT count(*) FROM aceptaciones_contractuales WHERE id = :objetivo"
+    ),
+    # WHY (usa la version del ANEXO y no la del contrato): la clave unica
+    # `(agencia, cliente, version)` ya tiene la del contrato sembrada para los tres
+    # inquilinos. Insertar la misma chocaria con esa clave y la sonda mediria la
+    # unicidad, no la politica.
+    ("aceptaciones_contractuales", "insercion"): text(
+        "INSERT INTO aceptaciones_contractuales "
+        "(id, agencia_id, cliente_id, version_id, aceptada_por) "
+        "VALUES (:nuevo, :a, :c, :version_de_sonda, 'operador_agencia:0000000000000000')"
+    ),
+    ("aceptaciones_contractuales", "actualizacion"): text(
+        "UPDATE aceptaciones_contractuales SET aceptada_por = 'sonda' WHERE id = :objetivo"
+    ),
+    ("aceptaciones_contractuales", "movimiento"): text(
+        "UPDATE aceptaciones_contractuales SET agencia_id = :a, cliente_id = :c "
+        "WHERE id = :objetivo"
+    ),
 }
 
 
@@ -872,7 +941,10 @@ def _sentencia_de_cliente(recurso: RecursoDeCliente, caso: Caso):
     """
     tabla = recurso.tabla
     agencia, cliente = DUENOS[caso.relacion]
-    parametros = {"nuevo": recurso.fila_nueva}
+    # `version_de_sonda` viaja SIEMPRE, igual que `nuevo`: un juego de parametros
+    # uniforme es lo que permite que esta funcion sea UNA y no ocho. `text()` liga
+    # solo los nombres que aparecen en la sentencia, asi que sobrar no molesta.
+    parametros = {"nuevo": recurso.fila_nueva, "version_de_sonda": VERSION_ANEXO_DESARROLLO}
     if caso.direccion in ("lectura", "actualizacion"):
         return _SQL[(tabla, caso.direccion)], parametros | {
             "objetivo": recurso.fila_de[caso.relacion]
@@ -1292,6 +1364,8 @@ CONSULTAS_SIN_FILTRO: dict[str, TextClause] = {
     "trabajos": text("SELECT id FROM trabajos"),
     "trabajos_archivados": text("SELECT id FROM trabajos_archivados"),
     "mensajes_entrantes": text("SELECT id FROM mensajes_entrantes"),
+    "suspensiones": text("SELECT id FROM suspensiones"),
+    "aceptaciones_contractuales": text("SELECT id FROM aceptaciones_contractuales"),
 }
 
 #: Y sus versiones destructivas: las escrituras a las que se les olvido el WHERE.

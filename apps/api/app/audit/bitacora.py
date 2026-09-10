@@ -21,7 +21,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -30,6 +32,7 @@ from uuid import UUID
 
 from sqlalchemy import text
 
+from app.tenancy.auth import Rol
 from app.tenancy.inquilino import Inquilino
 from app.tenancy.secrets import barrer
 
@@ -48,6 +51,59 @@ _LEER = text(
 #: Tope por defecto de una lectura. Una bitacora crece sin limite; una lectura sin
 #: tope acaba trayendose la tabla entera a memoria el dia que de verdad importa.
 TOPE_POR_DEFECTO = 200
+
+#: Cuantos caracteres hexadecimales de la huella entran en el actor. Suficientes
+#: para no colisionar y demasiado pocos para invertir.
+LARGO_DE_LA_HUELLA = 16
+
+#: La FORMA del «quien» de RF-10: `<rol>:<huella>`, nunca nombre ni correo.
+#:
+#: # WHY (se DERIVA del enum de roles y no se escribe a mano): un rol nuevo en
+#: `Rol` entra solo en esta forma. Una lista escrita aqui se quedaria corta el dia
+#: que alguien anada el tercero, y entonces el guard rechazaria actores legitimos
+#: —o, peor, alguien lo aflojaria a `.*` para que dejara de molestar.
+_ACTOR_OPACO = re.compile(
+    r"^(?:" + "|".join(sorted(re.escape(r.value) for r in Rol)) + r"):"
+    rf"[0-9a-f]{{{LARGO_DE_LA_HUELLA}}}$"
+)
+
+
+def actor_opaco(rol: Rol, identificador: str) -> str:
+    """El «quien» de RF-10: el rol, y una HUELLA del identificador de sesion.
+
+    # WHY (huella y no el identificador): el identificador de sesion es la clave de
+    # Redis con la que se REVOCA. Escribirlo en una tabla que nadie puede corregir
+    # dejaria una lista de mangos de revocacion vivos, para siempre, dentro del
+    # propio inquilino. La huella identifica igual —quien tenga el identificador
+    # puede recalcularla y correlar— y no sirve para tocar nada.
+    #
+    # # WHY (lleva el rol delante): un identificador opaco no le dice nada a quien
+    # lee la bitacora. `operador_agencia:9f18…` si se lee. Y es lo que permite que
+    # `es_actor_opaco` compruebe la FORMA sin tener que consultar a nadie.
+    #
+    # # WHY (vive aqui y no en cada llamador): hasta esta revision la forma se
+    # componia dentro de `baa_guard._actor_de`. Dos redacciones del mismo hecho
+    # divergen, y la que se queda vieja es la que nadie mira: el dia que una de las
+    # dos escribiera el identificador en claro, la bitacora —que no se puede
+    # corregir— lo guardaria para siempre.
+    """
+    if not isinstance(rol, Rol):
+        raise TypeError(
+            f"actor_opaco espera un Rol y recibio {type(rol).__name__}: el «quien» de "
+            "RF-10 se compone de un rol declarado, no de una cadena cualquiera"
+        )
+    if not isinstance(identificador, str) or not identificador:
+        raise ValueError(
+            "actor_opaco necesita un identificador de sesion no vacio: una huella de "
+            "la cadena vacia seria la MISMA para todo el mundo"
+        )
+    huella = hashlib.sha256(identificador.encode("utf-8")).hexdigest()[:LARGO_DE_LA_HUELLA]
+    return f"{rol.value}:{huella}"
+
+
+def es_actor_opaco(valor: object) -> bool:
+    """¿Este «quien» tiene la forma que RF-10 exige? Se comprueba, no se confia."""
+    return isinstance(valor, str) and bool(_ACTOR_OPACO.match(valor))
 
 
 @dataclass(frozen=True, slots=True)

@@ -112,6 +112,14 @@ SQL_DESTRUCTIVA_PERMITIDA: dict[str, str] = {
         "no hace DDL — no tiene CREATE sobre el esquema ni es duena de ninguna "
         "tabla, y las dos cosas las comprueba `test_rls_cobertura.py`"
     ),
+    "apps/api/migrations/versions/0010_la_suspension_y_la_aceptacion.py": (
+        "DDL de migracion, igual que la 0003: sus `DROP TABLE` estan en el "
+        "`downgrade()` y los ejecuta el rol MIGRADOR sobre el esquema, nunca la "
+        "aplicacion sobre los datos de un cliente. La aplicacion no hace DDL — no "
+        "tiene CREATE sobre el esquema ni es duena de ninguna tabla, y las dos cosas "
+        "las comprueba `test_rls_cobertura.py`. Deshacerla quita la suspension y la "
+        "aceptacion: ningun cliente queda apagado por una fila que ya no existe"
+    ),
     "apps/api/migrations/versions/0005_la_marca_de_desarrollo.py": (
         "DDL de migracion, igual que la 0004: su `DROP COLUMN` esta en el "
         "`downgrade()` y lo ejecuta el rol MIGRADOR sobre el esquema. Deshacerla "

@@ -5,7 +5,18 @@ siempre **lo mismo** —mismo codigo y mismo cuerpo— sin importar si ese domin
 
 1. es **desconocido** (nadie lo dio de alta nunca),
 2. esta **dado de alta pero sin verificar** (alguien empezo y no termino),
-3. pertenece a un **inquilino suspendido**.
+3. pertenece a un **inquilino RETIRADO** — relacion terminada y ventana de salida
+   vencida (B9).
+
+# WHY (el tercer estado se llama RETIRADO y no «suspendido», 14ª C-14-02): mientras
+# se llamo `SUSPENDIDO`, el producto tenia **dos cosas distintas con el mismo
+# nombre**, y eran opuestas. El *suspendido* de **RF-66** sigue **verificado y
+# atendido**: el heraldo calla, el portal pasa a solo lectura y el **export sigue
+# encendido** (B9). El de aqui es la relacion **terminada**: no se atiende y no se
+# admite ni que exista. Construido con el nombre viejo, un cliente suspendido por
+# impago habria caido entre los **no atendidos** y habria perdido su portal y su
+# export — que es justo lo que RF-66 promete conservar. `feedback_bug_dos_
+# direcciones`: lo distinto parecia lo mismo.
 
 # WHY (esto es AISLAMIENTO, no acabado): las respuestas que distinguen esos tres
 # casos convierten la plataforma en un directorio de clientes consultable **sin
@@ -18,7 +29,7 @@ siempre **lo mismo** —mismo codigo y mismo cuerpo— sin importar si ese domin
 # WHY (por que la respuesta se construye en UN solo sitio y la excepcion NO lleva
 # NADA dentro): la forma barata de escribir esto es un `if` por caso, cada uno con
 # su `raise`, y confiar en que los tres sigan iguales para siempre. No duran: el
-# dia que alguien anada un motivo «para depurar» al caso suspendido, la fuga
+# dia que alguien anada un motivo «para depurar» al caso retirado, la fuga
 # vuelve y ninguna prueba de ese cambio la mira. Aqui `DominioNoReconocido` es una
 # excepcion **sin campos**: no se le puede pasar un motivo aunque se quiera, y la
 # respuesta la fabrica `respuesta_de_dominio_no_reconocido()`, que no recibe
@@ -55,8 +66,9 @@ class EstadoDeDominio(StrEnum):
     DESCONOCIDO = "desconocido"
     #: Dado de alta, verificacion sin completar.
     SIN_VERIFICAR = "sin_verificar"
-    #: Verificado en su dia; el inquilino esta suspendido.
-    SUSPENDIDO = "suspendido"
+    #: Verificado en su dia; la relacion TERMINO y su ventana de salida vencio.
+    #: ==No es el «suspendido» de RF-66==, que sigue verificado y atendido.
+    RETIRADO = "retirado"
 
 
 #: Los tres que NO se atienden — y que, hacia fuera, son **el mismo**.
@@ -66,6 +78,12 @@ class EstadoDeDominio(StrEnum):
 #: conjunto y en las pruebas que lo recorren, en vez de quedarse fuera. Un estado
 #: nuevo que nadie clasifique **no puede** colarse como atendible: atendible es
 #: solo `VERIFICADO`, por definicion.
+#:
+#: # WHY (por que un cliente suspendido por RF-66 NO esta aqui, ni le hace falta un
+#: estado propio): la suspension es un estado del **cliente**, no del **dominio**.
+#: Un inquilino suspendido sigue `VERIFICADO` —su portal responde en solo lectura y
+#: su export sigue disponible—; lo que se apaga es responder, y eso lo decide
+#: `suspension.exigir_cliente_activo` en el punto de respuesta, no esta compuerta.
 ESTADOS_NO_ATENDIDOS: frozenset[EstadoDeDominio] = frozenset(
     estado for estado in EstadoDeDominio if estado is not EstadoDeDominio.VERIFICADO
 )
@@ -84,7 +102,7 @@ class DominioNoReconocido(Exception):  # noqa: N818 - no es un error, es un vere
     """Se lanza para los tres estados no atendidos. **No lleva nada dentro.**
 
     # WHY (el `__init__` vacio NO es ceremonia): una subclase de `Exception`
-    # acepta `*args` sin rechistar, asi que `raise DominioNoReconocido("suspendido")`
+    # acepta `*args` sin rechistar, asi que `raise DominioNoReconocido("retirado")`
     # funcionaria y el motivo quedaria guardado en `.args` — de donde alguien
     # acabaria sacandolo «solo para el registro» y, un dia, para la respuesta. Con
     # este constructor esa linea **no llega a ejecutarse**: revienta con `TypeError`

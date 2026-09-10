@@ -1,7 +1,7 @@
 """T-032 (RF-60): la respuesta al dominio no atendido no permite enumerar clientes.
 
 La afirmacion es de IGUALDAD, no de correccion: los **tres** casos no atendidos
-—dominio desconocido, dado de alta sin verificar, e inquilino suspendido— tienen
+—dominio desconocido, dado de alta sin verificar, e inquilino RETIRADO— tienen
 que producir **exactamente** la misma respuesta. Se compara el codigo, el cuerpo
 byte a byte y las cabeceras.
 
@@ -15,7 +15,7 @@ byte a byte y las cabeceras.
 #    la igualdad se lograria destruyendo el producto.
 #
 # WHY (que pondria estas pruebas en ROJO): anadir a la excepcion un campo con el
-# motivo y volcarlo en la respuesta; devolver 403 en el caso suspendido «porque es
+# motivo y volcarlo en la respuesta; devolver 403 en el caso retirado «porque es
 # mas correcto»; o cambiar la compuerta por un `not in ESTADOS_NO_ATENDIDOS`, que
 # atenderia cualquier estado futuro que nadie clasifique.
 #
@@ -62,7 +62,7 @@ RUTA_DEL_PORTAL = "/portal"
 DOMINIOS = {
     EstadoDeDominio.DESCONOCIDO: "nadie-lo-dio-de-alta.example",
     EstadoDeDominio.SIN_VERIFICAR: "empezado-sin-terminar.example",
-    EstadoDeDominio.SUSPENDIDO: "cliente-suspendido.example",
+    EstadoDeDominio.RETIRADO: "relacion-terminada.example",
     EstadoDeDominio.VERIFICADO: "cliente-al-dia.example",
 }
 
@@ -228,7 +228,7 @@ async def test_un_resolutor_que_revienta_responde_como_los_otros_tres() -> None:
     aplicacion = _aplicacion(
         EstadoDeDominio.DESCONOCIDO, resolutor_de_dominio=resolutor_roto
     )
-    async with _cliente(aplicacion, DOMINIOS[EstadoDeDominio.SUSPENDIDO]) as cliente:
+    async with _cliente(aplicacion, DOMINIOS[EstadoDeDominio.RETIRADO]) as cliente:
         respuesta = await cliente.get(RUTA_DEL_PORTAL)
 
     codigo, cuerpo, _ = await _huella(EstadoDeDominio.DESCONOCIDO)
@@ -246,12 +246,12 @@ def test_la_excepcion_no_puede_llevar_un_motivo_dentro() -> None:
     """El diseno, no la disciplina: no hay donde meter el dato que filtraria.
 
     # WHY: la forma natural de romper RF-60 dentro de seis meses es
-    # `raise DominioNoReconocido("suspendido")` «solo para el registro», y que
+    # `raise DominioNoReconocido("retirado")` «solo para el registro», y que
     # alguien lo imprima. Si la excepcion no acepta argumentos, esa linea no llega
     # ni a ejecutarse.
     """
     with pytest.raises(TypeError):
-        DominioNoReconocido("suspendido")  # type: ignore[call-arg]
+        DominioNoReconocido("retirado")  # type: ignore[call-arg]
 
     vacia = DominioNoReconocido()
     assert vacia.args == ()
