@@ -53,14 +53,53 @@ CLASE_AGENCIA = "de agencia"
 CLASE_NO_INQUILINO = "no-inquilino"
 CLASE_MEDIA_CLAVE = "media-clave"
 
-#: UNICA excepcion admitida, con su motivo ESCRITO. Anadir una entrada aqui es
-#: un acto deliberado y revisable; olvidarse de anadirla pone el CI en rojo.
+#: Excepciones admitidas, con su motivo ESCRITO. Anadir una entrada aqui es un
+#: acto deliberado y revisable; olvidarse de anadirla pone el CI en rojo.
 ALLOWLIST_NO_INQUILINO: dict[str, str] = {
+    "precios_por_pais": (
+        "Catalogo de PLATAFORMA (revision 0012, RF-16; el plan §3.0 lo declara "
+        "asi). No lleva claves de inquilino porque el precio de un mensaje a un "
+        "pais es el mismo para todos: darle un `agencia_id` seria copiar el "
+        "catalogo una vez por agencia y abrir la puerta a que dos agencias "
+        "tarifen distinto el mismo mensaje. No contiene ningun dato de inquilino "
+        "—son precios de un tercero— y la aplicacion solo puede LEERLA, cosa que "
+        "se mide abajo por efecto contra el rol real"
+    ),
     "alembic_version": (
         "Catalogo de migraciones de Alembic. No contiene ningun dato de "
         "inquilino: solo el identificador de la revision aplicada. El rol de "
         "aplicacion no tiene NINGUN privilegio sobre ella (se comprueba abajo), "
         "asi que no es alcanzable desde la aplicacion, con RLS o sin el."
+    ),
+}
+
+#: ==Subconjunto de la allowlist: las exentas que la aplicacion SI puede LEER.==
+#:
+#: # WHY (esta categoria existe desde T-111 y es un ENSANCHE MEDIDO del gate, no
+#: un agujero): hasta la revision 0012, «tabla sin claves de inquilino» solo
+#: podia significar una cosa —el catalogo de Alembic, que la aplicacion no
+#: alcanza— y el gate lo expresaba exigiendo CERO privilegios sobre toda tabla
+#: exenta. La 0012 trae una tercera forma legitima que el gate no habia previsto:
+#: un CATALOGO DE PLATAFORMA (`precios_por_pais`), que no tiene dato de inquilino
+#: alguno —todos ven las mismas filas— y que la aplicacion necesita LEER para
+#: contar el dinero. Habia dos salidas y una era falsa: envolver la lectura en
+#: una funcion `SECURITY DEFINER` habria dejado este gate verde mientras la
+#: aplicacion llega igual, que es rodear el guard en vez de arreglarlo
+#: (`feedback_no_rodear_el_guard`). La otra —esta— es decirle al gate cual es la
+#: regla de verdad: **ninguna tabla exenta es ESCRIBIBLE por la aplicacion, y si
+#: es legible es porque no contiene dato de inquilino y alguien lo escribio.**
+#:
+#: # WHY (el `SELECT` se afirma en POSITIVO): si manana el `GRANT` desapareciera,
+#: `costo_de_mensaje` fallaria en produccion y este gate seguiria verde por
+#: ausencia. Declarada aqui, la tabla tiene que ser legible; si deja de serlo,
+#: rojo.
+CATALOGOS_DE_PLATAFORMA: dict[str, str] = {
+    "precios_por_pais": (
+        "La aplicacion LEE el precio para contar el gasto de mensajeria contra el "
+        "techo (RF-16) y no lo escribe nunca: el catalogo lo carga el operador con "
+        "el rol migrador desde el archivo versionado del repositorio. Sin `INSERT` "
+        "ni `UPDATE` no existe un camino que 'corrija' un precio para que un envio "
+        "quepa bajo el techo"
     ),
 }
 
@@ -434,19 +473,71 @@ def test_la_allowlist_no_tiene_entradas_muertas(catalogo: dict) -> None:
     )
 
 
-def test_el_rol_de_aplicacion_no_alcanza_las_tablas_exentas(catalogo: dict, motor_admin) -> None:
-    """La excepcion se sostiene porque la aplicacion NO llega, no porque lo diga."""
+def test_ninguna_tabla_exenta_es_escribible_por_la_aplicacion(
+    catalogo: dict, motor_admin
+) -> None:
+    """La excepcion se sostiene porque la aplicacion no la ESCRIBE, no porque lo diga.
+
+    Un catalogo de plataforma declarado puede ser LEIDO —y se exige que lo sea,
+    en positivo, para que perder el `GRANT` salga rojo aqui y no en produccion—.
+    Lo que ninguna tabla exenta puede es recibir escritura: sin RLS, un `INSERT`
+    de un inquilino seria una fila que todos los demas ven.
+    """
+    escritura = ("INSERT", "UPDATE", "DELETE")
     with motor_admin.connect() as conexion:
+
+        def puede(tabla: str, verbo: str) -> bool:
+            return conexion.execute(
+                text("SELECT has_table_privilege(:rol, :tabla, :verbo)"),
+                {"rol": ROL_APLICACION, "tabla": tabla, "verbo": verbo},
+            ).scalar_one()
+
         for tabla in _de_clase(catalogo, CLASE_NO_INQUILINO):
-            for verbo in ("SELECT", "INSERT", "UPDATE", "DELETE"):
-                tiene = conexion.execute(
-                    text("SELECT has_table_privilege(:rol, :tabla, :verbo)"),
-                    {"rol": ROL_APLICACION, "tabla": tabla, "verbo": verbo},
-                ).scalar_one()
-                assert not tiene, (
+            for verbo in escritura:
+                assert not puede(tabla, verbo), (
                     f"{ROL_APLICACION} tiene {verbo} sobre {tabla}, que esta exenta de "
-                    "RLS. La exencion solo vale si la aplicacion no la alcanza"
+                    "RLS: una fila escrita ahi la verian TODOS los inquilinos, porque "
+                    "no hay ninguna politica que la acote"
                 )
+            if tabla in CATALOGOS_DE_PLATAFORMA:
+                assert puede(tabla, "SELECT"), (
+                    f"{tabla} se declara catalogo de plataforma —la aplicacion tiene "
+                    "que poder leerlo— y el rol no tiene SELECT. O se le concede, o "
+                    "sale de CATALOGOS_DE_PLATAFORMA: si no, el producto falla en "
+                    "produccion y este gate sigue verde"
+                )
+                continue
+            assert not puede(tabla, "SELECT"), (
+                f"{ROL_APLICACION} tiene SELECT sobre {tabla}, que esta exenta de RLS "
+                "y NO se declara catalogo de plataforma. Una tabla legible sin "
+                "politica solo es admisible si alguien escribio por que no contiene "
+                "ningun dato de inquilino"
+            )
+
+
+def test_todo_catalogo_de_plataforma_esta_ademas_en_la_allowlist_con_motivo(
+    catalogo: dict,
+) -> None:
+    """Las dos declaraciones van juntas: la clase, y por que se puede leer."""
+    for tabla, motivo in CATALOGOS_DE_PLATAFORMA.items():
+        assert tabla in ALLOWLIST_NO_INQUILINO, (
+            f"{tabla} se declara catalogo de plataforma y no esta en "
+            "ALLOWLIST_NO_INQUILINO: la excepcion a RLS seguiria sin motivo escrito"
+        )
+        assert len(motivo.strip()) >= 40, f"el motivo de {tabla} no explica nada: {motivo!r}"
+        assert clase_de(catalogo.get(tabla, {}).get("columnas", set())) == CLASE_NO_INQUILINO, (
+            f"{tabla} se declara catalogo de plataforma pero tiene claves de "
+            "inquilino: entonces es una tabla de inquilino y le toca su politica, no "
+            "una excepcion"
+        )
+
+
+def test_no_hay_catalogos_de_plataforma_muertos(catalogo: dict) -> None:
+    sobrantes = sorted(set(CATALOGOS_DE_PLATAFORMA) - set(catalogo))
+    assert not sobrantes, (
+        f"CATALOGOS_DE_PLATAFORMA declara tablas que no existen: {sobrantes}. Una "
+        "excepcion caducada tapa la siguiente"
+    )
 
 
 def test_la_migracion_declara_cada_atributo_que_se_afirma() -> None:

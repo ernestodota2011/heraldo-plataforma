@@ -1,0 +1,99 @@
+# Catalogo de precios de MENSAJERIA por pais y tipo de mensaje (RF-16).
+#
+# Lo carga `app.tenancy.budget.cargar_precios` en la tabla `precios_por_pais`.
+# La aplicacion solo LEE esa tabla; escribirla es un acto del operador con el rol
+# migrador.
+#
+# ==QUE SON ESTAS CIFRAS, dicho sin adornos: son COTAS SUPERIORES declaradas por
+# la casa, NO la tarifa publicada de la plataforma.== No estan contrastadas
+# contra la fuente primaria — el eje 3 de T-004*pre ("¿siguen vigentes cupos,
+# escalones y precios por pais?") sigue abierto — y por eso este archivo declara
+# `verificado = false` y su `fuente` lo dice tambien, para que el hecho viaje con
+# cada fila hasta la base y hasta cualquier importe que salga de ella.
+#
+# Por que una cota superior y no un hueco: RF-16 dice que el techo "nunca deja de
+# contar por no tener el dato, porque es ruta de dinero". Sobrecontar corta antes
+# de tiempo y cuesta una conversacion; subcontar deja pasar gasto por encima del
+# techo y cuesta dinero real, que es lo que RF-16 existe para impedir. Un cero o
+# un hueco es subcontar.
+#
+# `servicio` se tarifa como `utilidad` A PROPOSITO. No afirmamos que el mensaje
+# de servicio sea gratis: afirmamos que no creemos que cueste mas que una
+# utilidad. Un cero aqui seria una afirmacion sobre la plataforma que nadie ha
+# medido, y ademas en la direccion cara.
+#
+# La tarificacion por CONVERSACION esta deprecada desde el 1-jul-2025: hoy es por
+# mensaje/plantilla (T-004*pre). Por eso la llave es (pais, tipo) y no una
+# duracion.
+#
+# COMO SE SUSTITUYE: el operador descarga la tabla publicada por la plataforma,
+# la escribe aqui con su `fuente` y su `fecha` reales, pone `verificado = true` y
+# la carga. Mientras no ocurra, lo que protege el dinero es doble: la caducidad a
+# 30 dias (`cargada_en`) y el respaldo al precio mas alto conocido.
+
+fecha = "2026-09-09"
+verificado = false
+fuente = "cota superior declarada por la casa, SIN VERIFICAR contra la tarifa publicada de la plataforma (T-004*pre eje 3 abierto) - 2026-09-09"
+
+precios = [
+  { pais = "US", tipo = "marketing",     precio_usd = "0.030000", vigente_desde = "2025-07-01" },
+  { pais = "US", tipo = "utilidad",      precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "US", tipo = "autenticacion", precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "US", tipo = "servicio",      precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "CA", tipo = "marketing",     precio_usd = "0.030000", vigente_desde = "2025-07-01" },
+  { pais = "CA", tipo = "utilidad",      precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "CA", tipo = "autenticacion", precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "CA", tipo = "servicio",      precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "MX", tipo = "marketing",     precio_usd = "0.050000", vigente_desde = "2025-07-01" },
+  { pais = "MX", tipo = "utilidad",      precio_usd = "0.015000", vigente_desde = "2025-07-01" },
+  { pais = "MX", tipo = "autenticacion", precio_usd = "0.015000", vigente_desde = "2025-07-01" },
+  { pais = "MX", tipo = "servicio",      precio_usd = "0.015000", vigente_desde = "2025-07-01" },
+  { pais = "CO", tipo = "marketing",     precio_usd = "0.030000", vigente_desde = "2025-07-01" },
+  { pais = "CO", tipo = "utilidad",      precio_usd = "0.010000", vigente_desde = "2025-07-01" },
+  { pais = "CO", tipo = "autenticacion", precio_usd = "0.010000", vigente_desde = "2025-07-01" },
+  { pais = "CO", tipo = "servicio",      precio_usd = "0.010000", vigente_desde = "2025-07-01" },
+  { pais = "AR", tipo = "marketing",     precio_usd = "0.070000", vigente_desde = "2025-07-01" },
+  { pais = "AR", tipo = "utilidad",      precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "AR", tipo = "autenticacion", precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "AR", tipo = "servicio",      precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "BR", tipo = "marketing",     precio_usd = "0.070000", vigente_desde = "2025-07-01" },
+  { pais = "BR", tipo = "utilidad",      precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "BR", tipo = "autenticacion", precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "BR", tipo = "servicio",      precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "PE", tipo = "marketing",     precio_usd = "0.070000", vigente_desde = "2025-07-01" },
+  { pais = "PE", tipo = "utilidad",      precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "PE", tipo = "autenticacion", precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "PE", tipo = "servicio",      precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "CL", tipo = "marketing",     precio_usd = "0.100000", vigente_desde = "2025-07-01" },
+  { pais = "CL", tipo = "utilidad",      precio_usd = "0.040000", vigente_desde = "2025-07-01" },
+  { pais = "CL", tipo = "autenticacion", precio_usd = "0.040000", vigente_desde = "2025-07-01" },
+  { pais = "CL", tipo = "servicio",      precio_usd = "0.040000", vigente_desde = "2025-07-01" },
+  { pais = "ES", tipo = "marketing",     precio_usd = "0.070000", vigente_desde = "2025-07-01" },
+  { pais = "ES", tipo = "utilidad",      precio_usd = "0.040000", vigente_desde = "2025-07-01" },
+  { pais = "ES", tipo = "autenticacion", precio_usd = "0.040000", vigente_desde = "2025-07-01" },
+  { pais = "ES", tipo = "servicio",      precio_usd = "0.040000", vigente_desde = "2025-07-01" },
+  { pais = "GB", tipo = "marketing",     precio_usd = "0.070000", vigente_desde = "2025-07-01" },
+  { pais = "GB", tipo = "utilidad",      precio_usd = "0.040000", vigente_desde = "2025-07-01" },
+  { pais = "GB", tipo = "autenticacion", precio_usd = "0.040000", vigente_desde = "2025-07-01" },
+  { pais = "GB", tipo = "servicio",      precio_usd = "0.040000", vigente_desde = "2025-07-01" },
+  { pais = "DE", tipo = "marketing",     precio_usd = "0.130000", vigente_desde = "2025-07-01" },
+  { pais = "DE", tipo = "utilidad",      precio_usd = "0.080000", vigente_desde = "2025-07-01" },
+  { pais = "DE", tipo = "autenticacion", precio_usd = "0.080000", vigente_desde = "2025-07-01" },
+  { pais = "DE", tipo = "servicio",      precio_usd = "0.080000", vigente_desde = "2025-07-01" },
+  { pais = "FR", tipo = "marketing",     precio_usd = "0.150000", vigente_desde = "2025-07-01" },
+  { pais = "FR", tipo = "utilidad",      precio_usd = "0.090000", vigente_desde = "2025-07-01" },
+  { pais = "FR", tipo = "autenticacion", precio_usd = "0.090000", vigente_desde = "2025-07-01" },
+  { pais = "FR", tipo = "servicio",      precio_usd = "0.090000", vigente_desde = "2025-07-01" },
+  { pais = "IT", tipo = "marketing",     precio_usd = "0.070000", vigente_desde = "2025-07-01" },
+  { pais = "IT", tipo = "utilidad",      precio_usd = "0.040000", vigente_desde = "2025-07-01" },
+  { pais = "IT", tipo = "autenticacion", precio_usd = "0.040000", vigente_desde = "2025-07-01" },
+  { pais = "IT", tipo = "servicio",      precio_usd = "0.040000", vigente_desde = "2025-07-01" },
+  { pais = "IN", tipo = "marketing",     precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "IN", tipo = "utilidad",      precio_usd = "0.005000", vigente_desde = "2025-07-01" },
+  { pais = "IN", tipo = "autenticacion", precio_usd = "0.005000", vigente_desde = "2025-07-01" },
+  { pais = "IN", tipo = "servicio",      precio_usd = "0.005000", vigente_desde = "2025-07-01" },
+  { pais = "ID", tipo = "marketing",     precio_usd = "0.050000", vigente_desde = "2025-07-01" },
+  { pais = "ID", tipo = "utilidad",      precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "ID", tipo = "autenticacion", precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+  { pais = "ID", tipo = "servicio",      precio_usd = "0.020000", vigente_desde = "2025-07-01" },
+]

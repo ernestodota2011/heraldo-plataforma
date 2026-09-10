@@ -50,6 +50,9 @@ from conftest import (
     CLIENTE_A1,
     CLIENTE_A2,
     CLIENTE_B1,
+    CONSUMO_A1,
+    CONSUMO_A2,
+    CONSUMO_B1,
     HERALDO_A1,
     HERALDO_A2,
     HERALDO_B1,
@@ -664,6 +667,14 @@ RECURSOS_DE_CLIENTE: tuple[RecursoDeCliente, ...] = (
         puede_actualizar=False,
         fila_nueva=UUID("aaaaaaaa-0000-4000-8000-000000009090"),
     ),
+    RecursoDeCliente(
+        "consumos",
+        {"mio": CONSUMO_A1, "vecino": CONSUMO_A2, "ajeno": CONSUMO_B1},
+        # RF-16 sobre dinero: un registro de gasto que se puede reescribir no es
+        # un registro, es un saldo editable. Lo dice el GRANT de la 0012.
+        puede_actualizar=False,
+        fila_nueva=UUID("aaaaaaaa-0000-4000-8000-000000007070"),
+    ),
 )
 
 POR_TABLA: dict[str, RecursoDeCliente] = {r.tabla: r for r in RECURSOS_DE_CLIENTE}
@@ -747,10 +758,20 @@ NO_APLICA: dict[str, dict[tuple[str, str], str]] = {
 
 #: Tablas del catalogo que NO tienen matriz propia, con su motivo ESCRITO.
 SIN_MATRIZ_PROPIA: dict[str, str] = {
+    "precios_por_pais": (
+        "Catalogo de PLATAFORMA (revision 0012, RF-16): no tiene `agencia_id` ni "
+        "`cliente_id` porque el precio de un mensaje a un pais es el mismo para "
+        "todos los inquilinos. Sin dimension de inquilino no existe «mi fila», «la "
+        "del vecino» ni «la ajena», asi que las sondas de acceso cruzado no son "
+        "expresables sobre ella: no hay frontera que cruzar. Lo que SI hay que "
+        "medir es el otro eje —que la aplicacion pueda LEERLA y no pueda "
+        "escribirla— y eso se mide por efecto contra el rol real en "
+        "`test_techo.py` y en `test_rls_cobertura.py`"
+    ),
     "alembic_version": (
         "Catalogo de migraciones de Alembic: no contiene ningun dato de inquilino y "
         "el rol de aplicacion no tiene NINGUN privilegio sobre ella, cosa que "
-        "comprueba `test_el_rol_de_aplicacion_no_alcanza_las_tablas_exentas` en "
+        "comprueba `test_ninguna_tabla_exenta_es_escribible_por_la_aplicacion` en "
         "`test_rls_cobertura.py`. Una sonda de acceso cruzado contra una tabla que "
         "la aplicacion no puede ni abrir mediria el privilegio, no el aislamiento"
     ),
@@ -858,6 +879,18 @@ _SQL = {
     ),
     ("mensajes_entrantes", "movimiento"): text(
         "UPDATE mensajes_entrantes SET agencia_id = :a, cliente_id = :c WHERE id = :objetivo"
+    ),
+    # --- el registro de gasto de la revision 0012 (T-111, RF-16) ---
+    ("consumos", "lectura"): text("SELECT count(*) FROM consumos WHERE id = :objetivo"),
+    ("consumos", "insercion"): text(
+        "INSERT INTO consumos (id, agencia_id, cliente_id, titular, concepto, monto_usd) "
+        "VALUES (:nuevo, :a, :c, 'cliente', 'modelo', 1)"
+    ),
+    ("consumos", "actualizacion"): text(
+        "UPDATE consumos SET concepto = 'mensajeria' WHERE id = :objetivo"
+    ),
+    ("consumos", "movimiento"): text(
+        "UPDATE consumos SET agencia_id = :a, cliente_id = :c WHERE id = :objetivo"
     ),
 }
 

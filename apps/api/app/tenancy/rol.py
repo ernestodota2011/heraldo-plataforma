@@ -75,6 +75,19 @@ PRIVILEGIOS_DE_APLICACION: dict[str, tuple[str, ...]] = {
     # serviria para reescribir la historia de que llego y que no; un `DELETE`,
     # para volver a procesar un mensaje que ya se proceso una vez.
     "mensajes_entrantes": VERBOS_DE_SOLO_INSERCION,
+    # --- el techo de gasto (revision 0012) ---
+    # RF-16: el registro de gasto se escribe y se lee, y NO se corrige ni se
+    # borra. Un consumo que la aplicacion pueda actualizar o borrar no es un
+    # registro de gasto: es un saldo editable, y el techo se levantaria borrando
+    # filas en vez de subiendolo. La misma razon que la bitacora, sobre dinero.
+    "consumos": VERBOS_DE_SOLO_INSERCION,
+    # El catalogo de precios lo produce LA PLATAFORMA y lo carga el operador con
+    # el rol MIGRADOR. La aplicacion solo lo LEE: sin `INSERT`, no existe un
+    # camino que "corrija" un precio para que un envio quepa bajo el techo. Es la
+    # unica tabla de esta lista sin dimension de inquilino, y por eso
+    # `test_rls_cobertura.py` exige ademas que este declarada como catalogo de
+    # plataforma con su motivo escrito.
+    "precios_por_pais": ("SELECT",),
 }
 
 
