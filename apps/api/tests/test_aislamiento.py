@@ -50,6 +50,9 @@ from conftest import (
     CLIENTE_A1,
     CLIENTE_A2,
     CLIENTE_B1,
+    DESTINO_A1,
+    DESTINO_A2,
+    DESTINO_B1,
     HERALDO_A1,
     HERALDO_A2,
     HERALDO_B1,
@@ -664,6 +667,14 @@ RECURSOS_DE_CLIENTE: tuple[RecursoDeCliente, ...] = (
         puede_actualizar=False,
         fila_nueva=UUID("aaaaaaaa-0000-4000-8000-000000009090"),
     ),
+    RecursoDeCliente(
+        "destinos_de_aviso",
+        {"mio": DESTINO_A1, "vecino": DESTINO_A2, "ajeno": DESTINO_B1},
+        # RF-46-bis: se declara (INSERT) y se retira marcando `activo = false`
+        # (UPDATE) — nunca DELETE.
+        puede_actualizar=True,
+        fila_nueva=UUID("aaaaaaaa-0000-4000-8000-00000000a0a0"),
+    ),
 )
 
 POR_TABLA: dict[str, RecursoDeCliente] = {r.tabla: r for r in RECURSOS_DE_CLIENTE}
@@ -858,6 +869,21 @@ _SQL = {
     ),
     ("mensajes_entrantes", "movimiento"): text(
         "UPDATE mensajes_entrantes SET agencia_id = :a, cliente_id = :c WHERE id = :objetivo"
+    ),
+    # --- destinos internos de aviso (revision 0009, T-118) ---
+    ("destinos_de_aviso", "lectura"): text(
+        "SELECT count(*) FROM destinos_de_aviso WHERE id = :objetivo"
+    ),
+    ("destinos_de_aviso", "insercion"): text(
+        "INSERT INTO destinos_de_aviso "
+        "(id, agencia_id, cliente_id, canal, destino, etiqueta, declarado_por) "
+        "VALUES (:nuevo, :a, :c, 'correo', 'sonda@ejemplo.invalid', 'sonda', 'sonda')"
+    ),
+    ("destinos_de_aviso", "actualizacion"): text(
+        "UPDATE destinos_de_aviso SET etiqueta = 'sonda' WHERE id = :objetivo"
+    ),
+    ("destinos_de_aviso", "movimiento"): text(
+        "UPDATE destinos_de_aviso SET agencia_id = :a, cliente_id = :c WHERE id = :objetivo"
     ),
 }
 
@@ -1292,6 +1318,10 @@ CONSULTAS_SIN_FILTRO: dict[str, TextClause] = {
     "trabajos": text("SELECT id FROM trabajos"),
     "trabajos_archivados": text("SELECT id FROM trabajos_archivados"),
     "mensajes_entrantes": text("SELECT id FROM mensajes_entrantes"),
+    # La de la revision 0009 (T-118): sin esta linea, `test_el_endpoint_trampa_
+    # cubre_todos_los_recursos_de_la_bateria` sale roja — un recurso que solo esta
+    # en `RECURSOS_DE_CLIENTE` y no aqui queda a medias (CE-02 verde por ausencia).
+    "destinos_de_aviso": text("SELECT id FROM destinos_de_aviso"),
 }
 
 #: Y sus versiones destructivas: las escrituras a las que se les olvido el WHERE.
