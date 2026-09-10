@@ -54,11 +54,17 @@ from conftest import (
     CLIENTE_A1,
     CLIENTE_A2,
     HERALDO_A1,
+    HERALDO_A2,
     sesion_de_agencia,
     sesion_de_cliente,
 )
 
-pytestmark = pytest.mark.asyncio
+# WHY (aqui NO hay `pytestmark = pytest.mark.asyncio`): `pyproject.toml` declara
+# `asyncio_mode = "auto"`, asi que las corrutinas ya se ejecutan solas. Marcar el
+# modulo entero ademas ponia la marca sobre las sondas SINCRONAS —las del
+# catalogo y la de la ventana— y pytest-asyncio avisaba de ello en cada corrida.
+# Un aviso recurrente en la salida de la suite es ruido que acaba tapando al
+# aviso que si importa.
 
 MOMENTO = datetime(2026, 9, 15, 12, 0, tzinfo=UTC)
 
@@ -805,3 +811,213 @@ async def test_la_aplicacion_no_puede_escribir_el_catalogo_de_precios(motor) -> 
                     "fuente) VALUES ('US', 'utilidad', 1, '2025-07-01', 'sonda')"
                 )
             )
+
+
+async def test_la_aplicacion_si_puede_leer_el_catalogo_de_precios(motor, motor_admin) -> None:
+    """CONTROL de la sonda de arriba, y ademas el otro lado del privilegio.
+
+    # WHY: sin este control, un `REVOKE` que dejara al rol sin NINGUN privilegio
+    # sobre la tabla dejaria verde la sonda anterior —el `INSERT` seguiria
+    # fallando con `permission denied`— mientras el producto se cae en produccion
+    # al contar el gasto de mensajeria. La excepcion a RLS de un catalogo de
+    # plataforma se sostiene sobre DOS hechos, no uno: se lee y no se escribe.
+    """
+    _cargar(motor_admin, _TARIFA)
+    async with sesion_de_inquilino(motor, sesion_de_cliente(AGENCIA_A, CLIENTE_A1)) as conexion:
+        cuantas = (
+            await conexion.execute(text("SELECT count(*) FROM precios_por_pais"))
+        ).scalar_one()
+    assert cuantas == len(_TARIFA)
+
+
+async def test_la_aplicacion_no_puede_corregir_ni_borrar_un_consumo(motor, motor_admin) -> None:
+    """RF-10 aplicado al dinero, medido POR EFECTO contra el rol real.
+
+    Un registro de gasto que la aplicacion pueda reescribir no es un registro: es
+    un saldo editable, y entonces el techo se levanta borrando filas en vez de
+    subiendolo — y sin dejar rastro de quien lo hizo. El mecanismo esta en el
+    `GRANT` de la revision 0012, no en que este modulo no escriba el `UPDATE`.
+    """
+    from sqlalchemy.exc import DBAPIError
+
+    _fijar_techo(motor_admin, CLIENTE_A1, Decimal("10"), Decimal("0.99"))
+    inquilino = sesion_de_cliente(AGENCIA_A, CLIENTE_A1)
+    consumo = await _consumir(motor, inquilino, Decimal("1"))
+
+    for sentencia in (
+        "UPDATE consumos SET monto_usd = 0.000001 WHERE id = :i",
+        "DELETE FROM consumos WHERE id = :i",
+    ):
+        async with sesion_de_inquilino(motor, inquilino) as conexion:
+            with pytest.raises(DBAPIError, match="permission denied"):
+                await conexion.execute(text(sentencia), {"i": consumo.id})
+
+    # CONTROL: la fila sigue ahi y con su importe intacto. Sin esto, una tabla
+    # vacia haria pasar las dos aserciones de arriba sin haber medido nada.
+    with motor_admin.connect() as conexion:
+        monto = conexion.execute(
+            text("SELECT monto_usd FROM consumos WHERE id = :i"), {"i": consumo.id}
+        ).scalar_one()
+    assert monto == Decimal("1.000000")
+
+
+async def test_el_gasto_no_se_puede_atribuir_al_heraldo_de_otro_cliente(
+    motor, motor_admin
+) -> None:
+    """La atribucion tambien cuelga de la cascada, y no de la buena fe.
+
+    # WHY: el `WITH CHECK` de la politica gobierna `agencia_id` y `cliente_id`,
+    # no `heraldo_id`. Sin la foranea COMPUESTA de la revision 0012, una sesion
+    # legitima del cliente A1 podria escribir un consumo suyo atribuido a un
+    # heraldo del vecino y ningun mecanismo lo veria: la fila es «suya» en las
+    # dos claves que RLS mira.
+    """
+    from sqlalchemy.exc import DBAPIError
+
+    _fijar_techo(motor_admin, CLIENTE_A1, Decimal("10"), Decimal("0.99"))
+    inquilino = sesion_de_cliente(AGENCIA_A, CLIENTE_A1)
+
+    with pytest.raises(DBAPIError, match="consumos_heraldo_fkey"):
+        await _consumir(motor, inquilino, Decimal("1"), heraldo_id=HERALDO_A2)
+
+    # CONTROL: el heraldo PROPIO si se admite. Sin el, una foranea que rechazara
+    # TODA atribucion pasaria la asercion de arriba sin medir ningun aislamiento.
+    resultado = await _consumir(motor, inquilino, Decimal("1"), heraldo_id=HERALDO_A1)
+    assert resultado.gastado_usd == Decimal("1")
+
+
+# ==========================================================================
+# LA LLAVE DE LA IDEMPOTENCIA — que la alarma no se silencie a si misma
+# ==========================================================================
+async def test_subir_el_techo_vuelve_a_armar_la_alarma_del_mismo_mes(
+    motor, motor_admin
+) -> None:
+    """Sin el techo en la llave, subirlo deja al cliente sin alarma el resto del mes.
+
+    Y es justo cuando mas puede gastar, porque acaba de recibir mas margen: la
+    alarma se apagaria en el unico momento en que de verdad hacia falta.
+    """
+    _fijar_techo(motor_admin, CLIENTE_A1, Decimal("20"), UMBRAL_DE_ALARMA_POR_DEFECTO)
+    cliente = sesion_de_cliente(AGENCIA_A, CLIENTE_A1)
+    primera = await _consumir(motor, cliente, Decimal("17"))
+    assert {a.motivo for a in primera.avisos} == {"techo.alarma"}
+
+    operador = sesion_de_agencia(AGENCIA_A)
+    async with sesion_de_inquilino(motor, operador) as conexion:
+        await subir_techo(
+            conexion,
+            operador,
+            cliente_id=CLIENTE_A1,
+            nuevo_techo_usd=Decimal("100"),
+            actor="operador:sonda",
+        )
+
+    # 17 + 64 = 81, o sea el 81 % de 100: cruza el umbral del techo NUEVO.
+    segunda = await _consumir(motor, cliente, Decimal("64"))
+    assert {a.motivo for a in segunda.avisos} == {"techo.alarma"}, (
+        "el techo subio y la alarma del techo nuevo no salto: la idempotencia "
+        "mensual esta silenciando un limite que ya no es el que se aviso"
+    )
+
+
+async def test_la_alarma_de_la_agencia_no_silencia_la_del_cliente(motor, motor_admin) -> None:
+    """Dos techos distintos, dos alarmas: la llave lleva el RECURSO.
+
+    Las dos son `techo.alarma` sobre la misma agencia, asi que sin el recurso en
+    la llave la primera que salte apagaria a la otra durante todo el mes.
+    """
+    _fijar_techo(motor_admin, CLIENTE_A1, Decimal("20"), UMBRAL_DE_ALARMA_POR_DEFECTO)
+    with motor_admin.connect() as conexion:
+        conexion.execute(
+            text("UPDATE agencias SET techo_usd_mes = 20 WHERE agencia_id = :a"),
+            {"a": AGENCIA_A},
+        )
+    operador = sesion_de_agencia(AGENCIA_A)
+    async with sesion_de_inquilino(motor, operador) as conexion:
+        de_agencia = await registrar_consumo(
+            conexion,
+            operador,
+            concepto=CONCEPTO_MODELO,
+            monto_usd=Decimal("17"),
+            detalle={},
+            cliente_id=CLIENTE_A1,
+            titular=Titular.AGENCIA,
+            ahora=MOMENTO,
+        )
+    assert {a.motivo for a in de_agencia.avisos} == {"techo.alarma"}
+
+    del_cliente = await _consumir(
+        motor, sesion_de_cliente(AGENCIA_A, CLIENTE_A1), Decimal("17")
+    )
+
+    assert {a.motivo for a in del_cliente.avisos} == {"techo.alarma"}, (
+        "la alarma del techo de la AGENCIA silencio la del CLIENTE: la llave de "
+        "idempotencia no distingue los dos techos"
+    )
+    with motor_admin.connect() as conexion:
+        apuntes = conexion.execute(
+            text("SELECT count(*) FROM bitacora WHERE accion = 'techo.alarma'")
+        ).scalar_one()
+    assert apuntes == 2
+
+
+# ==========================================================================
+# EL CARGADOR — un error de ENTRADA no puede matar el DESTINO
+# ==========================================================================
+def test_un_cargue_invalido_no_destruye_el_catalogo_vigente(motor_admin) -> None:
+    """Si se borrara antes de validar, un archivo mal escrito apagaria el conteo.
+
+    # WHY: `costo_de_mensaje` LEVANTA con el catalogo vacio —a proposito, porque
+    # contar cero es contar mal en la direccion cara—, asi que dejar la tabla
+    # vacia a mitad de una carga no degrada el producto: lo para. La entrada
+    # invalida va la ULTIMA a proposito: con la validacion mezclada con la
+    # escritura, las anteriores ya se habrian escrito sobre una tabla vaciada.
+    """
+    _cargar(motor_admin, _TARIFA)
+
+    with pytest.raises(ValueError, match="ISO"):
+        _cargar(
+            motor_admin,
+            (
+                {"pais": "MX", "tipo": "utilidad", "precio_usd": "0.0050",
+                 "vigente_desde": "2025-07-01"},
+                {"pais": "USA", "tipo": "utilidad", "precio_usd": "0.0140",
+                 "vigente_desde": "2025-07-01"},
+            ),
+        )
+
+    with motor_admin.connect() as conexion:
+        cuantas = conexion.execute(text("SELECT count(*) FROM precios_por_pais")).scalar_one()
+    assert cuantas == len(_TARIFA), (
+        f"quedan {cuantas} filas de {len(_TARIFA)}: un cargue rechazado toco el "
+        "catalogo vigente. Un error de ENTRADA no puede matar el DESTINO"
+    )
+
+
+def test_un_catalogo_vacio_no_se_carga(motor_admin) -> None:
+    """Vaciar la tabla «cargando nada» dejaria la rama del no sin respaldo."""
+    _cargar(motor_admin, _TARIFA)
+    with pytest.raises(ValueError, match="VACIO"):
+        _cargar(motor_admin, ())
+    with motor_admin.connect() as conexion:
+        cuantas = conexion.execute(text("SELECT count(*) FROM precios_por_pais")).scalar_one()
+    assert cuantas == len(_TARIFA)
+
+
+def test_el_archivo_de_precios_dice_si_esta_verificado() -> None:
+    """La pregunta «¿estas cifras estan contrastadas?» la contesta quien escribe.
+
+    # WHY (se exige la DECLARACION, no un valor concreto): hoy el catalogo del
+    # repositorio son cotas superiores sin contrastar y declara `false`; el dia
+    # que alguien cargue la tarifa real declarara `true`. Lo que esta prueba
+    # impide es la tercera opcion —no decirlo— porque una cifra sin procedencia
+    # repetida acaba pareciendo verificada (P-03).
+    """
+    archivo = leer_archivo_de_precios(ARCHIVO_DE_PRECIOS)
+    assert isinstance(archivo.verificado, bool)
+    if not archivo.verificado:
+        assert "VERIFICAR" in archivo.fuente.upper(), (
+            "el catalogo se declara NO verificado y su `fuente` no lo dice: la "
+            "procedencia tiene que viajar con cada fila hasta la base, no quedarse "
+            "en un campo que nadie consulta"
+        )
