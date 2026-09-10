@@ -28,16 +28,32 @@ de cambio. La prueba de aislamiento entre inquilinos —la que funda el
 producto— ya cuelga de este mismo gate, contra un **Postgres real** levantado
 como servicio del trabajo: RLS, `FORCE`, `SET LOCAL` y el rechazo de un `INSERT`
 ajeno son comportamiento del motor, y un simulacro mediría el simulacro.
+<!-- respalda: apps/api/tests/test_rls_cobertura.py::test_toda_tabla_de_inquilino_tiene_rls_forzada, apps/api/tests/test_aislamiento.py::test_el_inquilino_no_sobrevive_a_la_transaccion, apps/api/tests/test_aislamiento.py::test_insertar_con_el_identificador_de_otra_agencia_es_rechazado -->
 
 > **Y lo impide de verdad.** La rama principal exige la comprobación
 > `verificacion`, y la regla **incluye a quien administra** (`enforce_admins`):
 > con el gate en rojo GitHub rechaza la fusión, también al dueño del
-> repositorio. No es una promesa de este README — está medido por efecto:
+> repositorio.
+> <!-- respalda: apps/api/tests/test_cimiento.py::test_el_guion_de_proteccion_existe_donde_se_cree, apps/api/tests/test_cimiento.py::test_los_contextos_salen_del_flujo_real_y_no_estan_vacios, apps/api/tests/test_cimiento.py::test_el_nombre_declarado_manda_sobre_la_clave_del_trabajo -->
+> No es una promesa de este README — está medido por efecto:
 > se intentó fusionar un cambio con el CI en rojo y GitHub lo rechazó, con su
 > control en verde. Lo aplica
 > [`deploy/proteger_rama.py`](deploy/proteger_rama.py), que **deriva** del
 > propio `ci.yml` las comprobaciones a exigir y **relee** lo aplicado, porque un
 > `200` dice que la petición se aceptó, no que el estado quedara como se pidió.
+> ⚠️ Este párrafo, a propósito, **no lleva el ancla `respalda:`** de más arriba:
+> lo que esa cita mide es que el mecanismo **deriva y compara bien** las
+> comprobaciones a exigir — no que GitHub las siga aplicando hoy mismo, que es
+> lo que este párrafo añade. Eso segundo fue un experimento manual y puntual
+> contra un tercero (ver [`docs/heraldo-problemas.md`](docs/heraldo-problemas.md),
+> P-01): ningún `pytest` de este repositorio abre una conexión de red hacia
+> GitHub para repetirlo en cada corrida —haría falta una ficha viva y un PR
+> desechable en cada CI, y todo egreso de red pasa por `packages/egress`, que
+> es de los servicios, no de la suite—, así que no existe, ni puede existir, un
+> identificador de prueba que lo respalde. Es la única afirmación de capacidad
+> de esta página que el gate de RF-31 no vigila, y por eso queda fuera de su
+> convención en vez de marcada `sin respaldo`: esa forma es para una prueba que
+> hoy no existe y algún día podría escribirse, y aquí no hay ninguna posible.
 
 ## Cómo está organizado
 
@@ -58,10 +74,12 @@ separados. Si la salida viviera dentro de uno, el otro acabaría **copiándola**
 y esa copia sería un segundo camino de salida que se salta las comprobaciones
 —destino, consentimiento, ventana, cupo, corte—. Con un solo punto, olvidarse de
 una comprobación es imposible: no hay dónde olvidarla.
+<!-- respalda: apps/api/tests/test_cimiento.py::test_el_paquete_de_salida_es_de_primer_nivel, apps/api/tests/test_cimiento.py::test_el_paquete_de_salida_se_importa -->
 
 Los dos servicios lo **declaran como dependencia**, y hay una prueba que se pone
 en rojo si un servicio nuevo se olvida de declararlo. La regla no depende de que
 alguien la recuerde.
+<!-- respalda: apps/api/tests/test_cimiento.py::test_hay_servicios_que_medir, apps/api/tests/test_cimiento.py::test_todo_servicio_declara_el_paquete_de_salida -->
 
 ## Trabajar en el repositorio
 
@@ -123,6 +141,7 @@ Las tres variables **se declaran; no se adivinan**. Si falta cualquiera, el
 proceso no arranca y dice cuál falta. No hay valor por defecto para los
 orígenes, ni siquiera en desarrollo: el valor cómodo de hoy es el `localhost`
 que aparece en producción mañana.
+<!-- respalda: apps/api/tests/test_superficie.py::test_sin_entorno_declarado_no_se_arranca, apps/api/tests/test_superficie.py::test_sin_origenes_declarados_no_hay_lista_por_defecto, apps/api/tests/test_superficie.py::test_sin_dsn_declarado_no_se_arranca_y_dice_cual_falta -->
 
 ### Quién puede hablar con la API (RF-30)
 
@@ -136,10 +155,12 @@ criterio**:
 | una dirección privada (`192.168.…`) | admitido | rechazado |
 | `http://` sin cifrar | admitido | rechazado |
 | `https://panel.ejemplo.com/` (con barra) | rechazado | rechazado |
+<!-- respalda: apps/api/tests/test_superficie.py::test_el_comodin_se_rechaza_en_todos_los_entornos[*], apps/api/tests/test_superficie.py::test_el_mismo_localhost_se_admite_en_desarrollo_y_se_rechaza_fuera, apps/api/tests/test_superficie.py::test_la_lista_de_produccion_rechaza_cada_forma_del_defecto[direccion-privada], apps/api/tests/test_superficie.py::test_la_lista_de_produccion_rechaza_cada_forma_del_defecto[http://panel.ejemplo.com], apps/api/tests/test_superficie.py::test_la_lista_de_produccion_rechaza_cada_forma_del_defecto[https://panel.ejemplo.com/], apps/api/tests/test_superficie.py::test_control_un_origen_bien_formado_de_produccion_se_admite -->
 
 Nunca se usa una expresión regular de orígenes: es el defecto que se midió en el
 producto de referencia, donde un patrón admitía el bucle local **en producción**.
 Una lista se puede escribir bien o mal; un patrón se escribe «casi bien».
+<!-- respalda: apps/api/tests/test_superficie.py::test_ningun_modulo_de_la_aplicacion_usa_una_expresion_regular_de_origenes, apps/api/tests/test_superficie.py::test_la_aplicacion_montada_no_lleva_ningun_comodin_ni_bucle_local -->
 
 ### Las dos sondas (RF-51)
 
@@ -152,6 +173,7 @@ No son la misma sonda con dos nombres. Con la base caída, la de disponibilidad
 devuelve `503` y la de vivacidad sigue devolviendo `200` — si también fallara,
 el orquestador reiniciaría el proceso una y otra vez mientras la base sigue
 caída, y el bucle de reinicio se lleva por delante el trabajo en curso.
+<!-- respalda: apps/api/tests/test_superficie.py::test_la_vivacidad_no_puede_alcanzar_la_base, apps/api/tests/test_superficie.py::test_con_la_base_caida_la_disponibilidad_falla_y_la_vivacidad_no, apps/api/tests/test_superficie.py::test_control_con_la_base_en_pie_las_dos_sondas_contestan_que_si -->
 
 ### Nada irreversible sin confirmación (RNF-06)
 
@@ -164,21 +186,27 @@ petición lleva esa confirmación, y entonces sí se ejecuta.
 DELETE /clientes/{id}                              → 409 + inventario + confirmación
 DELETE /clientes/{id}?confirmacion=<la de arriba>  → 200, hecho
 ```
+<!-- respalda: apps/api/tests/test_confirmacion.py::test_sin_confirmacion_se_pide_el_inventario[None], apps/api/tests/test_confirmacion.py::test_la_ruta_con_la_confirmacion_correcta_si_destruye_y_solo_lo_suyo -->
 
 - **No existe un «sí» genérico.** `?confirmacion=si` no vale: el único valor
   válido se calcula a partir del inventario, así que no se puede escribir sin
   haberlo recibido.
+  <!-- respalda: apps/api/tests/test_confirmacion.py::test_una_confirmacion_generica_no_vale[si] -->
 - **Si el recuento cambió**, la confirmación caduca. Confirmaste 412 filas; no se
   destruyen 900 en tu nombre.
+  <!-- respalda: apps/api/tests/test_confirmacion.py::test_la_confirmacion_caduca_si_cambia_lo_que_se_va_a_destruir -->
 - **Si no se puede contar, no se confirma.** Nunca se destruye a ciegas.
+  <!-- respalda: apps/api/tests/test_confirmacion.py::test_si_una_tabla_no_se_deja_contar_NO_se_confirma -->
 - El universo de lo que se destruye **se deriva del catálogo**: una tabla nueva
   entra sola en el inventario el día que su migración la cree.
+  <!-- respalda: apps/api/tests/test_confirmacion.py::test_el_universo_del_inventario_se_deriva_del_catalogo -->
 
 > **Hoy esta ruta no destruye nada en producción, y es a propósito.** Necesita
 > dos cosas que todavía no existen: la identidad autenticada (T-015) y la
 > bitácora de sólo inserción (T-017). Sin cualquiera de las dos responde `503`.
 > Son cerrojos, no adornos: una operación irreversible sobre datos de un cliente
 > no se ejecuta sin saber **quién** la pidió ni dejar **rastro** (RF-10).
+> <!-- respalda: apps/api/tests/test_confirmacion.py::test_sin_identidad_cableada_la_ruta_ni_siquiera_inventaria, apps/api/tests/test_confirmacion.py::test_sin_bitacora_cableada_la_ruta_se_niega -->
 
 ## Reglas de la casa que aplican a este repositorio
 
@@ -193,6 +221,15 @@ DELETE /clientes/{id}?confirmacion=<la de arriba>  → 200, hecho
 - **Todo problema no trivial deja su entrada** en
   [`docs/heraldo-problemas.md`](docs/heraldo-problemas.md), con su prevención
   cableada como prueba.
+- **Toda afirmación de capacidad de esta documentación cita la prueba real que
+  la respalda** (RF-31): la línea siguiente a la afirmación lleva un
+  `<!-- respalda: ruta::prueba -->`, o dice honestamente
+  `<!-- respalda: sin respaldo -->` cuando de verdad no hay ninguna. Lo
+  comprueba [`scripts/documentacion_vs_codigo.py`](scripts/documentacion_vs_codigo.py)
+  contra lo que `pytest` recolecta hoy — nunca contra lo que alguien recuerda
+  haber escrito. Nace de que el producto de referencia declaraba Tailwind sin
+  usarlo.
+  <!-- respalda: apps/api/tests/test_documentacion.py::test_el_readme_real_no_tiene_afirmaciones_sin_respaldo -->
 
 ## Seguridad
 

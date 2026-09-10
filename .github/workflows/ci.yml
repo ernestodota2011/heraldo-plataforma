@@ -10,11 +10,16 @@
 # en rojo en vez de reducir en silencio lo que se mide — el verde no dice QUE
 # midio (`feedback_verde_no_dice_que_midio`).
 #
-# LIMITE DECLARADO, NO MAQUILLADO (P-01): este gate se pone en rojo, pero
-# **NO impide la fusion**. La proteccion de rama de esta cuenta devuelve
-# `403 Upgrade to GitHub Pro`, asi que RF-27 esta cumplido a medias: la mitad
-# «la suite corre y se pone en rojo» esta cerrada; la mitad «impide la fusion»
-# espera una decision de dinero. No se simula con nada.
+# RF-27 SI impide la fusion, y esta linea lo dice porque se volvio a medir, no
+# porque se asuma (T-112, hallado al escribir el gate de documentacion <-> codigo
+# contra el propio README): P-01 (2026-08-26) midio un `403 Upgrade to GitHub
+# Pro` — la proteccion de rama no existia sobre un repositorio PRIVADO en el plan
+# gratuito. Este repositorio es PUBLICO desde entonces, y el plan gratuito SI
+# ofrece proteccion de rama sobre repositorios publicos: releido por efecto
+# (2026-09-10) contra `GET /repos/.../branches/main/protection`, la rama
+# `main` de este repositorio devuelve `required_status_checks.contexts:
+# ["verificacion"]` y `enforce_admins.enabled: true`. Detalle en
+# `docs/heraldo-problemas.md` (P-01).
 name: ci
 
 on:
@@ -140,6 +145,19 @@ jobs:
             uv run --no-sync python scripts/publicable.py
           fi
 
+      # RF-31 / CE-09 (T-112): toda afirmacion de capacidad de `README.md` y
+      # `docs/*.md` cita, en la linea siguiente, la prueba real que la respalda
+      # — y este paso comprueba esa cita contra lo que `pytest --collect-only`
+      # recolecta HOY, no contra lo que alguien recuerda haber escrito. Nace de
+      # que la auditoria del referente encontro Tailwind declarado en su
+      # documentacion y sin usar en ningun sitio: nada media si lo escrito y lo
+      # real seguian de acuerdo. Barato como el paso de abajo (solo colecciona,
+      # no toca Postgres ni Redis), y va ANTES por el mismo motivo que
+      # Publicabilidad: si algo aqui esta mal, no vale la pena esperar a que
+      # termine la suite completa para enterarse.
+      - name: Documentacion contra codigo
+        run: uv run --no-sync python scripts/documentacion_vs_codigo.py
+
       # La bateria, NOMBRADA POR RUTA. El paso de abajo la volveria a correr
       # dentro de la suite completa, pero solo si sigue donde dice estar: si
       # alguien la borra o la renombra, `pytest` sale con «file or directory not
@@ -173,6 +191,7 @@ jobs:
           apps/api/tests/test_worker.py
           apps/api/tests/test_cimiento.py
           apps/api/tests/test_publicable.py
+          apps/api/tests/test_documentacion.py
           apps/api/tests/test_egreso_red.py
           apps/api/tests/test_cabeceras.py
           apps/api/tests/test_enumeracion_inquilinos.py
