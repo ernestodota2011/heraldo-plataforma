@@ -1198,3 +1198,50 @@ async def test_el_costo_de_un_mensaje_exige_un_instante_con_zona(motor, motor_ad
             await costo_de_mensaje(
                 conexion, "US", "utilidad", datetime(2026, 9, 15, 12, 0)  # noqa: DTZ001
             )
+
+
+async def test_un_detalle_desmedido_no_entra_en_el_registro_de_gasto(
+    motor, motor_admin
+) -> None:
+    """`consumos` es de SOLO INSERCION: lo que entre ahi no se recorta despues.
+
+    # WHY (el caso es «guardo la respuesta entera por si acaso»): es el atajo
+    # natural, y mete kilobytes de texto ajeno por fila en la tabla que mas crece
+    # del producto. El `barrer` de al lado cubre el otro eje del mismo atajo —que
+    # lo volcado lleve un secreto—; este cubre el tamano.
+    """
+    from app.tenancy.budget import TOPE_DEL_DETALLE_BYTES, DetalleDemasiadoGrande
+
+    _fijar_techo(motor_admin, CLIENTE_A1, Decimal("10"), Decimal("0.99"))
+    inquilino = sesion_de_cliente(AGENCIA_A, CLIENTE_A1)
+
+    async with sesion_de_inquilino(motor, inquilino) as conexion:
+        with pytest.raises(DetalleDemasiadoGrande):
+            await registrar_consumo(
+                conexion,
+                inquilino,
+                concepto=CONCEPTO_MODELO,
+                monto_usd=Decimal("1"),
+                detalle={"respuesta": "x" * (TOPE_DEL_DETALLE_BYTES + 1)},
+                ahora=MOMENTO,
+            )
+
+    with motor_admin.connect() as conexion:
+        cuantas = conexion.execute(text("SELECT count(*) FROM consumos")).scalar_one()
+    assert cuantas == 0
+
+    # CONTROL: un detalle del tamano que el requisito describe SI entra. Sin esto,
+    # un tope de cero pasaria la asercion de arriba sin medir nada.
+    resultado = await _consumir(motor, inquilino, Decimal("1"))
+    assert resultado.gastado_usd == Decimal("1")
+
+
+def test_el_catalogo_no_se_carga_con_una_fecha_sin_zona(motor_admin) -> None:
+    """`cargada_en` es `timestamptz`: sin zona, la caducidad a 30 dias se desplaza.
+
+    Postgres interpretaria el instante en el huso del servidor, asi que el mismo
+    catalogo caducaria en momentos distintos segun donde corra la base — y la
+    rama del no de RF-16 se dispararia antes o despues sin que nadie lo vea.
+    """
+    with pytest.raises(ValueError, match="sin zona"):
+        _cargar(motor_admin, _TARIFA, cargada_en=datetime(2026, 9, 15, 12, 0))  # noqa: DTZ001

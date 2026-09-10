@@ -109,6 +109,15 @@ ACCION_ALARMA = "techo.alarma"
 ACCION_TECHO_ALCANZADO = "techo.alcanzado"
 ACCION_TECHO_SUBIDO = "techo.subido"
 
+#: Tope del `detalle` de un consumo, ya serializado. ==WHY: `consumos` es de
+#: SOLO INSERCION== — lo que entre ahi no se puede recortar despues. El riesgo
+#: no es teorico: el atajo natural es «guardo la respuesta entera del proveedor
+#: por si acaso», y eso mete kilobytes de texto ajeno por fila en la tabla que
+#: mas crece del producto. 8 KB caben de sobra para lo que el detalle describe
+#: (modelo, tokens, pais, tipo) y cortan el volcado. Lo pidio la revision
+#: cruzada; el `barrer` de al lado cubre el otro eje del mismo atajo.
+TOPE_DEL_DETALLE_BYTES = 8 * 1024
+
 #: Los dos destinatarios que RF-16 nombra: «avisar al operador y al cliente».
 DESTINATARIOS_DEL_TECHO = ("operador", "cliente")
 
@@ -132,6 +141,10 @@ class ConceptoNoAdmitido(ValueError):
 
 class ConsumoSinCliente(ValueError):
     """Gasto sin dueno: en alcance agencia hay que nombrar al cliente."""
+
+
+class DetalleDemasiadoGrande(ValueError):
+    """El detalle de un consumo no es un sitio donde volcar una respuesta entera."""
 
 
 class SinTechoAlcanzable(RuntimeError):
@@ -435,7 +448,7 @@ async def registrar_consumo(
                 "titular": titular.value,
                 "concepto": concepto,
                 "monto_usd": monto,
-                "detalle": json.dumps(barrer(dict(detalle)), default=str, ensure_ascii=False),
+                "detalle": _detalle_serializado(detalle),
                 "registrado_en": momento,
             },
         )
@@ -513,6 +526,15 @@ async def subir_techo(
 ) -> Decimal:
     """Sube el techo de un cliente. Acto del OPERADOR, con su apunte.
 
+    # ==WHY (NO hay tope superior, y es una omision DECLARADA): la revision
+    # cruzada pidio uno== —un cero de mas convierte 100 en 1000— y no se pone
+    # aqui. Un maximo es una decision de POLITICA comercial: cual es el gasto que
+    # la agencia esta dispuesta a dejar correr sin hablar con el cliente. Eso lo
+    # dice la spec, no este modulo, y una cifra inventada en el codigo se
+    # convertiria en la politica de facto sin que nadie la haya decidido. Lo que
+    # si hay es rastro: subir el techo es un acto del operador y deja su apunte
+    # con el valor anterior y el nuevo, asi que un cero de mas se ve y se corrige.
+    #
     # WHY (solo sube): B4 dice «la plataforma nunca lo baja sola». Bajarlo es
     # otro acto —y con otras consecuencias: un cliente cortado a mitad de mes por
     # una bajada silenciosa no sabria por que— y por eso no existe aqui. Que la
@@ -686,6 +708,12 @@ def cargar_precios(
             "ninguna fila, y sin ninguna fila no hay «precio mas alto conocido» — la "
             "rama del no de RF-16 se quedaria sin respaldo"
         )
+    if cargada_en.tzinfo is None:
+        raise ValueError(
+            f"cargada_en={cargada_en!r} viene sin zona horaria, y `precios_por_pais."
+            "cargada_en` es `timestamptz`: Postgres lo interpretaria en el huso del "
+            "servidor y la caducidad a 30 dias se desplazaria sin que nadie lo vea"
+        )
     if not isinstance(fuente, str) or not fuente.strip():
         raise ValueError(
             "el catalogo se carga SIEMPRE con su fuente: una cifra que gobierna dinero "
@@ -737,6 +765,20 @@ def leer_archivo_de_precios(ruta: Path) -> ArchivoDePrecios:
 # ==========================================================================
 # Piezas internas
 # ==========================================================================
+def _detalle_serializado(detalle: Mapping[str, Any]) -> str:
+    """El detalle, barrido de secretos y acotado en tamano."""
+    texto = json.dumps(barrer(dict(detalle)), default=str, ensure_ascii=False)
+    tamano = len(texto.encode("utf-8"))
+    if tamano > TOPE_DEL_DETALLE_BYTES:
+        raise DetalleDemasiadoGrande(
+            f"el detalle del consumo ocupa {tamano} bytes y el tope es "
+            f"{TOPE_DEL_DETALLE_BYTES}. `consumos` es de solo insercion: lo que entre "
+            "ahi no se puede recortar despues. El detalle describe el gasto (modelo, "
+            "tokens, pais, tipo); no es donde se guarda la respuesta del proveedor"
+        )
+    return texto
+
+
 def _monto_valido(monto: Decimal) -> Decimal:
     # ==WHY (un `float` se RECHAZA, no se convierte): `Decimal(0.1)` es
     # 0.1000000000000000055511151231257827..., y `Decimal(str(0.1))` esconde el

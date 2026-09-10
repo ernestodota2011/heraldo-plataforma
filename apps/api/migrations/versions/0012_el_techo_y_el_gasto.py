@@ -3,6 +3,17 @@
 Revision ID: 0012
 Revises: 0005
 
+# ==WHY (`down_revision = "0005"` salta seis numeros, y es DELIBERADO): las
+# revisiones 0006-0011 no existen todavia en esta rama.== Se estan escribiendo a
+# la vez en otros carriles de la misma ola —conocimiento, usos, destinos de
+# aviso—, cada uno en su worktree, y ninguno ve a los demas. Cada carril reserva
+# su numero y cuelga de la ultima revision que SI existe en la rama principal,
+# que es la 0005; al fusionar, quien integra re-encadena las que hayan aterrizado
+# antes. La alternativa —adivinar el numero del vecino— produciria dos revisiones
+# con el mismo `down_revision`, que es exactamente la historia RAMIFICADA que
+# D-10 prohibe. Lo levanto la revision cruzada dos veces: queda escrito aqui para
+# que no haya que volver a preguntarlo.
+
 # WHY (T-111, RF-16, CS-01): el techo es RUTA DE DINERO. Su fuente de verdad
 # tiene que ser Postgres y no Redis ni la memoria de un proceso (RNF-03): con el
 # estado en memoria el techo se multiplica por el numero de procesos, y con el
@@ -259,6 +270,23 @@ SQL_CONGELADO: dict[str, tuple[str, ...]] = {
 }
 
 
+#: Lo que deshace esta revision, LITERAL y en orden. Se escribe como lista de
+#: sentencias y no como un bucle con f-strings: aqui no hay ningun valor que
+#: derivar, y una sentencia destructiva se lee mejor entera que interpolada — la
+#: revision cruzada lo senalo, y ademas quita el `noqa` que tapaba el aviso.
+DESHACER_SQL: tuple[str, ...] = (
+    "DROP TABLE IF EXISTS consumos",
+    "DROP TABLE IF EXISTS precios_por_pais",
+    "ALTER TABLE heraldos DROP CONSTRAINT IF EXISTS heraldos_inquilino_id_key",
+    "ALTER TABLE clientes DROP COLUMN IF EXISTS techo_actualizado_en",
+    "ALTER TABLE clientes DROP COLUMN IF EXISTS umbral_de_alarma",
+    "ALTER TABLE clientes DROP COLUMN IF EXISTS techo_usd_mes",
+    "ALTER TABLE agencias DROP COLUMN IF EXISTS techo_actualizado_en",
+    "ALTER TABLE agencias DROP COLUMN IF EXISTS umbral_de_alarma",
+    "ALTER TABLE agencias DROP COLUMN IF EXISTS techo_usd_mes",
+)
+
+
 def upgrade() -> None:
     op.execute(CLAVE_DE_HERALDOS_SQL)
     for sentencia in TABLAS_SQL:
@@ -291,10 +319,5 @@ def downgrade() -> None:
     # El orden importa: las tablas primero, porque `consumos` cuelga de las dos
     # claves que se sueltan despues.
     """
-    op.execute("DROP TABLE IF EXISTS consumos")
-    op.execute("DROP TABLE IF EXISTS precios_por_pais")
-    op.execute("ALTER TABLE heraldos DROP CONSTRAINT IF EXISTS heraldos_inquilino_id_key")
-    for tabla in ("clientes", "agencias"):
-        op.execute(f"ALTER TABLE {tabla} DROP COLUMN IF EXISTS techo_actualizado_en")  # noqa: S608
-        op.execute(f"ALTER TABLE {tabla} DROP COLUMN IF EXISTS umbral_de_alarma")  # noqa: S608
-        op.execute(f"ALTER TABLE {tabla} DROP COLUMN IF EXISTS techo_usd_mes")  # noqa: S608
+    for sentencia in DESHACER_SQL:
+        op.execute(sentencia)
