@@ -223,7 +223,16 @@ async def suspender_cliente(
     Devuelve la suspension VIGENTE. Si ya habia una, devuelve **esa** y no toca
     nada: el motivo es el de la causa que la abrio, no el de la ultima vez que
     alguien lo intento — reescribirlo borraria de la bitacora lo que el cliente
-    tenia que subsanar.
+    tenia que subsanar. Quien llame tiene que MIRAR lo devuelto: el motivo que sale
+    puede no ser el que se pidio.
+
+    # WHY (aqui NO se comprueba que el cliente sea de la agencia de la sesion — lo
+    # pregunto la revision cruzada): esa comprobacion existe y no vive en Python.
+    # La politica de RLS de `suspensiones` lleva `WITH CHECK`, asi que un `INSERT` a
+    # nombre de un cliente fuera del alcance de la sesion lo rechaza el motor. Y no
+    # se supone: la matriz de `test_aislamiento.py` la mide sobre esta tabla en los
+    # dos ejes y las tres direcciones de escritura. Repetirla aqui seria una segunda
+    # redaccion del mismo gobierno, y la que se quedara vieja mandaria.
     """
     _exigir_cliente(inquilino)
     escritor = _exigir_actor(actor)

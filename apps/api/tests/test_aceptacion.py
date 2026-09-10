@@ -46,6 +46,7 @@ from app.tenancy.aceptacion import (
     AceptacionNoAutorizada,
     Documento,
     VersionInexistente,
+    VersionNoVigente,
     aceptaciones_vigentes,
     catalogo,
     esta_en_solo_desarrollo,
@@ -232,6 +233,47 @@ async def test_un_alta_que_solo_acepta_uno_de_los_dos_documentos_es_rojo(
             ),
         )
     assert await _cuantos_clientes(motor, agencia) == antes
+
+
+async def test_un_alta_que_acepta_una_version_YA_SUPERADA_es_rojo(motor, agencia) -> None:
+    """RF-66, ultima linea: nadie opera bajo una version que ya no es la publicada.
+
+    # WHY (lo levanto la revision cruzada): comprobar solo que la version EXISTA
+    # dejaba pasar un alta bajo el texto anterior. El barrido lo habria cazado al dia
+    # siguiente y el cliente habria nacido ya pendiente — un alta que nace en
+    # infraccion no es un alta valida, es una infraccion con fecha.
+    """
+    antes = await _cuantos_clientes(motor, agencia)
+    for documento in sorted(DOCUMENTOS_EXIGIDOS):
+        await _publicar(motor, agencia, documento, "3.0", desarrollo=False)
+
+    with pytest.raises(VersionNoVigente):
+        await alta_de_cliente(
+            motor,
+            sesion=OPERADOR,
+            nombre="Cafeteria Tardia",
+            sector=Sector.HOSTELERIA,
+            # Las de desarrollo siguen PUBLICADAS; lo que ya no son es las vigentes.
+            aceptacion=aceptacion_de_desarrollo(ACTOR),
+        )
+    assert await _cuantos_clientes(motor, agencia) == antes
+
+
+async def test_control_tras_publicar_la_nueva_el_alta_con_ELLA_pasa(motor, agencia) -> None:
+    """El control de la sonda de arriba: si rechazara siempre, no mediria nada."""
+    antes = await _cuantos_clientes(motor, agencia)
+    nuevas = [
+        await _publicar(motor, agencia, documento, "3.0", desarrollo=False)
+        for documento in sorted(DOCUMENTOS_EXIGIDOS)
+    ]
+    await alta_de_cliente(
+        motor,
+        sesion=OPERADOR,
+        nombre="Cafeteria Puntual",
+        sector=Sector.HOSTELERIA,
+        aceptacion=Aceptacion(versiones=tuple(v.id for v in nuevas), aceptada_por=ACTOR),
+    )
+    assert await _cuantos_clientes(motor, agencia) == antes + 1
 
 
 async def test_el_alta_deja_su_apunte_de_aceptacion(motor, agencia) -> None:

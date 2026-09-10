@@ -103,6 +103,17 @@ _POR_IDS = text(_CATALOGO + " WHERE id IN :ids").bindparams(
     bindparam("ids", expanding=True)
 )
 
+#: Las dos formas de leer el catalogo, cada una PREPARADA por separado.
+#:
+#: # WHY (dos sentencias y no una armada por concatenacion): la version anterior
+#: pegaba el `WHERE` a mano segun el argumento. Aunque el valor viajaba ligado y no
+#: habia superficie de inyeccion, ese patron es el que invita a que manana alguien
+#: pegue algo que SI venga de fuera. Dos literales completos no dejan sitio.
+_CATALOGO_ENTERO = text(_CATALOGO + " ORDER BY publicada_en DESC, id DESC")
+_CATALOGO_POR_DOCUMENTO = text(
+    _CATALOGO + " WHERE documento = :documento ORDER BY publicada_en DESC, id DESC"
+)
+
 _ALCANCE_DECLARADO = text(f"SELECT current_setting('{VARIABLE_ALCANCE}') AS alcance")
 
 _PUBLICAR = text(
@@ -147,6 +158,18 @@ _CLIENTES_SIN_ESTA_VERSION = text(
 
 class VersionInexistente(Exception):
     """Se acepto una version que el catalogo no publica. Falla cerrado."""
+
+
+class VersionNoVigente(Exception):
+    """Se acepto una version publicada, si — pero no la que hoy esta vigente.
+
+    # WHY (lo levanto la revision cruzada, y tenia razon): comprobar solo que la
+    # version EXISTA deja pasar un alta bajo una version anterior, y RF-66 lo
+    # prohibe en su ultima linea — «nunca un cliente operando bajo una version que
+    # ya no es la publicada». El barrido de re-aceptacion lo habria detectado al dia
+    # siguiente y el cliente habria nacido ya pendiente: un alta que nace en
+    # infraccion no es un alta valida, es una infraccion con fecha de caducidad.
+    """
 
 
 class AceptacionAusente(Exception):
@@ -271,13 +294,14 @@ def exigir_aceptacion(aceptacion: object) -> Aceptacion:
 
 async def catalogo(conexion, *, documento: Documento | None = None) -> list[VersionPublicada]:
     """Lo que la plataforma tiene publicado, de lo mas nuevo a lo mas viejo."""
-    consulta = _CATALOGO
-    parametros: dict[str, Any] = {}
-    if documento is not None:
-        consulta += " WHERE documento = :documento"
-        parametros["documento"] = Documento(documento).value
-    consulta += " ORDER BY publicada_en DESC, id DESC"
-    filas = (await conexion.execute(text(consulta), parametros)).all()
+    if documento is None:
+        filas = (await conexion.execute(_CATALOGO_ENTERO)).all()
+    else:
+        filas = (
+            await conexion.execute(
+                _CATALOGO_POR_DOCUMENTO, {"documento": Documento(documento).value}
+            )
+        ).all()
     return [_version(f) for f in filas]
 
 
@@ -314,6 +338,14 @@ async def publicar_version(
     # plataforma. Escribirlo ahi obligaria a elegir un cliente al azar, que seria un
     # asiento falso. Lo que SI queda por cliente es la re-aceptacion que esta
     # publicacion provoca, y eso lo apunta `revisar_reaceptaciones`.
+    #
+    # # WHY (`hash_del_texto` se exige no vacio y NO se le impone forma): aqui se
+    # comprueba que exista, porque sin el «que acepto este cliente» no tiene
+    # respuesta. Que sea un resumen criptografico del texto publicado es obligacion
+    # de quien publica (T-030·quater), y este modulo no ve ningun texto: imponerle
+    # forma de hexadecimal de 64 obligaria a las versiones de DESARROLLO —que no
+    # tienen texto que resumir— a inventarse una huella con pinta de real, que es
+    # peor que un centinela que se lee como lo que es.
     """
     await _exigir_alcance_de_agencia(conexion)
     if not isinstance(version, str) or not version.strip():
@@ -343,10 +375,11 @@ async def registrar_aceptacion(
 ) -> tuple[UUID, ...]:
     """Escribe la aceptacion del cliente. Falla cerrado y NO escribe nada a medias.
 
-    Comprueba, contra el CATALOGO, que cada version exista y que entre todas cubran
-    exactamente los documentos exigidos. Va dentro de la transaccion del alta: si
-    algo de esto falla, el alta entera se deshace — que es como «sin aceptacion no
-    hay alta» deja de ser una frase.
+    Comprueba, contra el CATALOGO, que cada version **exista**, que sea la
+    **vigente** de su documento y que entre todas cubran exactamente los documentos
+    exigidos. Va dentro de la transaccion del alta: si algo de esto falla, el alta
+    entera se deshace — que es como «sin aceptacion no hay alta» deja de ser una
+    frase.
     """
     _exigir_cliente(inquilino)
     exigida = exigir_aceptacion(aceptacion)
@@ -374,6 +407,20 @@ async def registrar_aceptacion(
         raise AceptacionAusente(
             f"la aceptacion no cubre los documentos exigidos: faltan {faltan}, "
             f"sobran {sobran}. RF-66 exige el contrato Y su anexo de tratamiento"
+        )
+
+    vigentes = await versiones_vigentes(conexion)
+    obsoletas = [
+        f"{v.documento.value}={v.version}"
+        for v in por_documento
+        if vigentes.get(v.documento) is None or vigentes[v.documento].id != v.id
+    ]
+    if obsoletas:
+        raise VersionNoVigente(
+            f"estas versiones estan publicadas pero ya no son la vigente de su "
+            f"documento: {obsoletas}. RF-66 exige la version VIGENTE — aceptar una "
+            "anterior deja al cliente operando bajo un texto que ya no es el publicado "
+            "desde el minuto uno"
         )
 
     escritas: list[UUID] = []
@@ -451,6 +498,16 @@ async def revisar_reaceptaciones(
     # # WHY (sin cablear al worker): quien lo llama cada dia es `apps/worker`, y esa
     # costura la toca otra casilla. Dejarlo aqui como funcion con reloj inyectable
     # es lo que permite medir los dos lados del plazo sin esperar reloj real.
+    #
+    # # WHY (lo que este barrido NO acota, dicho en voz alta — lo levanto la revision
+    # cruzada): recorre la cartera ENTERA y devuelve un aviso por pendiente, sin
+    # paginar; y cada corrida deja un apunte nuevo por cada cliente que siga
+    # pendiente, en una tabla que no se purga. Hoy no hay ningun defecto vivo —esta
+    # funcion no tiene todavia ningun llamador de produccion— pero las dos cosas son
+    # obligaciones de quien la cablee: correrla **una vez al dia** como mucho y, si
+    # el recordatorio se repite mas alla de un umbral, cambiar de MENSAJE en vez de
+    # repetir el mismo (`feedback_aviso_recurrente_sin_techo`). Quedan escritas aqui
+    # y en el registro de la casilla, no supuestas.
     """
     await _exigir_alcance_de_agencia(conexion)
     if not es_actor_opaco(actor):
@@ -482,6 +539,19 @@ async def revisar_reaceptaciones(
             "gracia_dias": int(gracia.total_seconds() // 86400),
             "vencida": vencida,
         }
+        if vencida:
+            # WHY (se guarda la suspension DEVUELTA y no se da por hecho el motivo):
+            # `suspender_cliente` es idempotente sobre la vigente — si el cliente ya
+            # estaba apagado por impago, devuelve ESA y no le cambia el motivo. Un
+            # aviso que afirmara «se suspende por re-aceptacion» estaria contando un
+            # corte que no ocurrio, y el operador buscaria una causa equivocada.
+            suspension = await suspender_cliente(
+                conexion, inquilino, motivo=MOTIVO_REACEPTACION_PENDIENTE, actor=actor
+            )
+            detalle["motivo_de_la_suspension"] = suspension.motivo
+            detalle["suspendida_por_esta_causa"] = (
+                suspension.motivo == MOTIVO_REACEPTACION_PENDIENTE
+            )
         await apuntar(
             conexion,
             inquilino,
@@ -490,10 +560,6 @@ async def revisar_reaceptaciones(
             recurso=f"cliente:{cliente_id}",
             detalle=detalle,
         )
-        if vencida:
-            await suspender_cliente(
-                conexion, inquilino, motivo=MOTIVO_REACEPTACION_PENDIENTE, actor=actor
-            )
         avisos.append(
             Aviso(
                 inquilino=inquilino,
